@@ -1,0 +1,13 @@
+backend/tmp/
+unpacked_atlantis/
+skills/
+__pycache__/
+*.pyc
+*.pyo
+.env
+*.docx
+!Modele_Word_ATLANTIS.docx
+*.zip
+.venv/
+venv/
+node_modules/
