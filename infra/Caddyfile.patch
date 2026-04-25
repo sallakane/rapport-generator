@@ -1,0 +1,22 @@
+# Contenu COMPLET du Caddyfile à mettre dans /etc/caddy/Caddyfile
+# Copier avec : sudo cp /var/www/rapport-generator/infra/Caddyfile.patch /etc/caddy/Caddyfile
+# Puis recharger : sudo systemctl reload caddy
+
+# sunu-cagnotte.org — redirige www vers le domaine principal
+www.sunu-cagnotte.org {
+    redir https://sunu-cagnotte.org{uri} permanent
+}
+
+sunu-cagnotte.org {
+    reverse_proxy localhost:8080
+}
+
+# ag-rapport-generator.fr — redirige www vers le domaine principal
+www.ag-rapport-generator.fr {
+    redir https://ag-rapport-generator.fr{uri} permanent
+}
+
+ag-rapport-generator.fr {
+    header X-Robots-Tag "noindex, nofollow"
+    reverse_proxy localhost:8001
+}

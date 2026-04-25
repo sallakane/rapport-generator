@@ -23,11 +23,16 @@ rapport-generator/
 │   ├── extractor.py               ← extraction chapitres/annexes depuis .docx
 │   ├── filter.py                  ← filtrage XML + repack (issu de filter_chapters.py)
 │   ├── requirements.txt
+│   ├── .env                       ← identifiants (gitignored)
 │   └── tmp/                       ← stockage temporaire (gitignored)
 ├── frontend/
 │   ├── index.html                 ← interface unique (upload → checkboxes → download)
 │   ├── style.css
 │   └── app.js
+├── infra/
+│   ├── rapport-generator.service  ← service systemd (copié dans /etc/systemd/system/)
+│   └── Caddyfile.patch            ← Caddyfile complet du VPS (référence)
+├── venv/                          ← virtualenv Python (gitignored)
 ├── skills/                        ← skill docx (déjà présent, ne pas modifier)
 ├── filter_chapters.py             ← prototype original (référence)
 └── .gitignore
@@ -112,26 +117,61 @@ python-dotenv==1.0.0  # lecture du .env
 
 ## Déploiement sur le VPS
 
-Le VPS utilise **Caddy** comme reverse proxy, déjà configuré.
+Le VPS utilise **Caddy** comme reverse proxy. Le projet tourne sur le domaine **ag-rapport-generator.fr**, port interne **8001**.
 
-### Lancement du backend
+Cohabite avec `sunu-cagnotte` sur le même VPS (port 8080).
+
+### Premier déploiement (une seule fois)
+
 ```bash
-cd backend
-pip install -r requirements.txt
-uvicorn main:app --host 127.0.0.1 --port 8000
+# 1. Créer le virtualenv et installer les dépendances
+python3 -m venv /var/www/rapport-generator/venv
+/var/www/rapport-generator/venv/bin/pip install -r backend/requirements.txt
+
+# 2. Créer le .env (ne jamais committer)
+cp backend/.env.example backend/.env   # puis éditer avec les vrais identifiants
+
+# 3. Installer le service systemd
+sudo cp infra/rapport-generator.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable rapport-generator
+sudo systemctl start rapport-generator
 ```
 
-### Configuration Caddy (à ajouter dans Caddyfile)
+### Mise à jour du code
+
+```bash
+git pull
+sudo systemctl restart rapport-generator
 ```
-votre-domaine.com {
-    reverse_proxy 127.0.0.1:8000
+
+### Service systemd
+
+- Fichier : `infra/rapport-generator.service` (installé dans `/etc/systemd/system/`)
+- Uvicorn démarre sur `127.0.0.1:8001` avec 2 workers
+- `EnvironmentFile` pointe vers `backend/.env`
+- Commandes utiles :
+  ```bash
+  sudo systemctl status rapport-generator
+  sudo systemctl restart rapport-generator
+  sudo journalctl -u rapport-generator -f
+  ```
+
+### Configuration Caddy
+
+Le Caddyfile complet du VPS est versionné dans `infra/Caddyfile.patch` (référence).
+Chemin réel sur le serveur : `/etc/caddy/Caddyfile`
+
+```
+ag-rapport-generator.fr {
+    header X-Robots-Tag "noindex, nofollow"
+    reverse_proxy localhost:8001
 }
 ```
 
-### Lancement en production (systemd ou screen)
+Après toute modification du Caddyfile :
 ```bash
-screen -S docx-filter
-uvicorn main:app --host 127.0.0.1 --port 8000 --workers 2
+sudo systemctl reload caddy
 ```
 
 ## Points de vigilance
@@ -142,9 +182,9 @@ uvicorn main:app --host 127.0.0.1 --port 8000 --workers 2
 
 ## Ordre de développement
 1. [x] Prototype logique métier (`filter_chapters.py`)
-2. [ ] `backend/extractor.py` — extraction des chapitres
-3. [ ] `backend/filter.py` — filtrage + repack (portage de filter_chapters.py)
-4. [ ] `backend/main.py` — FastAPI avec les 3 endpoints
-5. [ ] `frontend/index.html` + `app.js` + `style.css`
+2. [x] `backend/extractor.py` — extraction des chapitres
+3. [x] `backend/filter.py` — filtrage + repack (portage de filter_chapters.py)
+4. [x] `backend/main.py` — FastAPI avec les 3 endpoints
+5. [x] `frontend/index.html` + `app.js` + `style.css`
 6. [ ] Tests manuels en local
-7. [ ] Déploiement VPS + configuration Caddy
+7. [x] Déploiement VPS + configuration Caddy (`ag-rapport-generator.fr`)

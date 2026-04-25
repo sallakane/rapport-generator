@@ -1,0 +1,15 @@
+[Unit]
+Description=Rapport Generator — FastAPI (uvicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=deploy
+WorkingDirectory=/var/www/rapport-generator/backend
+EnvironmentFile=/var/www/rapport-generator/backend/.env
+ExecStart=/var/www/rapport-generator/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8001 --workers 2
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
