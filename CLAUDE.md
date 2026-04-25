@@ -85,6 +85,31 @@ Identique à `filter_chapters.py` :
 - Chaque session crée un dossier `backend/tmp/<session_id>/`
 - Nettoyage automatique après 30 minutes (via `asyncio` background task)
 
+## Authentification
+
+L'application est un intranet privé — pas de référencement Google, accès restreint.
+
+### Stratégie retenue : session token simple
+- Page `/login` avec formulaire user/password
+- Identifiants stockés dans `.env` (`APP_USER`, `APP_PASSWORD`) — jamais dans le code
+- À la connexion réussie : cookie de session signé (via `itsdangerous` ou `fastapi-sessions`)
+- Toutes les routes API vérifient le cookie, retournent 401 sinon
+- Le frontend redirige vers `/login` si 401
+
+### No-index (ne pas apparaître sur Google)
+Ajout d'un header HTTP dans Caddy :
+```
+header X-Robots-Tag "noindex, nofollow"
+```
+
+### Dépendances supplémentaires pour l'auth
+```
+itsdangerous==2.2.0   # signature des cookies de session
+python-dotenv==1.0.0  # lecture du .env
+```
+
+---
+
 ## Déploiement sur le VPS
 
 Le VPS utilise **Caddy** comme reverse proxy, déjà configuré.
