@@ -6,7 +6,7 @@ __pycache__/
 *.pyo
 .env
 *.docx
-!Modele_Word_ATLANTIS.docx
+!modele_word_atlantis.docx
 *.zip
 .venv/
 venv/
