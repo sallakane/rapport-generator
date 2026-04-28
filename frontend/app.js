@@ -278,22 +278,26 @@ $('btn-deselect-all').addEventListener('click', deselectAll);
 
 /* ── Progress (simulée) ─────────────────────────────────────────────── */
 let progressTimer = null;
-let progressValue = 0;
+let progressStart = 0;
+let progressTau = 30;
 
 function setProgress(p) {
-  progressValue = p;
   $('progress-bar').style.width = `${p}%`;
   $('progress-percent').textContent = `${Math.round(p)} %`;
 }
 
-function startProgress() {
+function startProgress(itemCount) {
+  // ETA empirique : ~0.75 s/item + 5 s d'overhead (100 items ≈ 60-80 s,
+  // 154 items ≈ 120 s d'après les mesures terrain).
+  // On vise ~85 % de la barre à t=ETA, asymptote à 90 %.
+  const etaSeconds = Math.max(8, 5 + 0.75 * itemCount);
+  progressTau = etaSeconds / 2.89;
+  progressStart = performance.now();
   setProgress(0);
   show('generate-overlay');
-  // Animation asymptotique : avance vite au début, ralentit en approchant 90 %.
   progressTimer = setInterval(() => {
-    const remaining = 90 - progressValue;
-    if (remaining <= 0.5) return;
-    setProgress(progressValue + Math.max(0.4, remaining * 0.05));
+    const elapsed = (performance.now() - progressStart) / 1000;
+    setProgress(90 * (1 - Math.exp(-elapsed / progressTau)));
   }, 200);
 }
 
@@ -311,7 +315,8 @@ function stopProgress(success) {
 $('btn-generate').addEventListener('click', async () => {
   clearError('generate-error');
   $('btn-generate').disabled = true;
-  startProgress();
+  const leafCount = [...state.chapters].filter(id => !(state.childrenOf.get(id)?.length)).length;
+  startProgress(leafCount + state.annexes.size);
 
   try {
     const res = await api('POST', '/api/generate', {
