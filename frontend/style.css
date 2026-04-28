@@ -302,3 +302,59 @@ h1 { font-size: 1.5rem; font-weight: 700; color: var(--blue-dk); margin-bottom: 
   box-shadow: 0 4px 20px rgba(0,0,0,.1);
 }
 #count-label { font-size: .9rem; color: var(--muted); }
+
+/* ── Overlay de génération ───────────────────────────────────────── */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 47, 92, .55);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: overlay-fade .15s ease-out;
+}
+@keyframes overlay-fade { from { opacity: 0; } to { opacity: 1; } }
+
+.overlay-card {
+  background: var(--white);
+  border-radius: 14px;
+  padding: 1.8rem 2.2rem;
+  width: min(420px, calc(100% - 2rem));
+  box-shadow: 0 14px 44px rgba(0,0,0,.28);
+  text-align: center;
+}
+.overlay-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--blue-dk);
+  margin-bottom: .25rem;
+}
+.overlay-subtitle {
+  font-size: .85rem;
+  color: var(--muted);
+  margin-bottom: 1.3rem;
+}
+
+.progress {
+  height: 10px;
+  background: var(--blue-lt);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-bottom: .55rem;
+}
+.progress-bar {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--accent), var(--blue));
+  border-radius: 999px;
+  transition: width .3s ease-out;
+}
+.progress-percent {
+  font-size: .85rem;
+  font-weight: 600;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}

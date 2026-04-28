@@ -67,10 +67,19 @@
         </button>
       </div>
       <div id="generate-error" class="error hidden"></div>
-      <div id="generate-loading" class="loading hidden">
-        <span class="spinner"></span> Génération en cours…
-      </div>
     </main>
+  </div>
+
+  <!-- ── Overlay de génération ─────────────────────────────────── -->
+  <div id="generate-overlay" class="overlay hidden" aria-live="polite" aria-busy="true">
+    <div class="overlay-card">
+      <div class="overlay-title">Génération en cours…</div>
+      <div class="overlay-subtitle">Traitement du document, merci de patienter.</div>
+      <div class="progress">
+        <div id="progress-bar" class="progress-bar"></div>
+      </div>
+      <div id="progress-percent" class="progress-percent">0 %</div>
+    </div>
   </div>
 
   <script src="app.js"></script>

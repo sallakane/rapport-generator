@@ -276,11 +276,42 @@ function deselectAll() {
 $('btn-select-all').addEventListener('click', selectAll);
 $('btn-deselect-all').addEventListener('click', deselectAll);
 
+/* ── Progress (simulée) ─────────────────────────────────────────────── */
+let progressTimer = null;
+let progressValue = 0;
+
+function setProgress(p) {
+  progressValue = p;
+  $('progress-bar').style.width = `${p}%`;
+  $('progress-percent').textContent = `${Math.round(p)} %`;
+}
+
+function startProgress() {
+  setProgress(0);
+  show('generate-overlay');
+  // Animation asymptotique : avance vite au début, ralentit en approchant 90 %.
+  progressTimer = setInterval(() => {
+    const remaining = 90 - progressValue;
+    if (remaining <= 0.5) return;
+    setProgress(progressValue + Math.max(0.4, remaining * 0.05));
+  }, 200);
+}
+
+function stopProgress(success) {
+  if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+  if (success) {
+    setProgress(100);
+    setTimeout(() => hide('generate-overlay'), 350);
+  } else {
+    hide('generate-overlay');
+  }
+}
+
 /* ── Generate ───────────────────────────────────────────────────────── */
 $('btn-generate').addEventListener('click', async () => {
   clearError('generate-error');
-  show('generate-loading');
   $('btn-generate').disabled = true;
+  startProgress();
 
   try {
     const res = await api('POST', '/api/generate', {
@@ -288,6 +319,7 @@ $('btn-generate').addEventListener('click', async () => {
       annexes: [...state.annexes],
     });
     const blob = await res.blob();
+    stopProgress(true);
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -295,9 +327,9 @@ $('btn-generate').addEventListener('click', async () => {
     a.click();
     URL.revokeObjectURL(url);
   } catch (err) {
+    stopProgress(false);
     showError('generate-error', err.message);
   } finally {
-    hide('generate-loading');
     updateCount();
   }
 });
