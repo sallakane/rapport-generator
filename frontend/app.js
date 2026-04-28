@@ -1,9 +1,10 @@
 /* ── State ──────────────────────────────────────────────────────────── */
 const state = {
-  sessionId: null,
-  structure: [],
-  selected: new Set(),
-  filename: '',
+  structure: null,                  // { sections, annexes }
+  chapters: new Set(),              // ids cochés (h1_*, h2_*, h3_*)
+  annexes: new Set(),               // numéros cochés
+  parentOf: new Map(),              // childId → parentId (h2 → h1, h3 → h2)
+  childrenOf: new Map(),            // parentId → [childId...]
 };
 
 /* ── DOM helpers ────────────────────────────────────────────────────── */
@@ -12,8 +13,8 @@ const show = id => $(id).classList.remove('hidden');
 const hide = id => $(id).classList.add('hidden');
 
 function showView(name) {
-  ['login', 'upload', 'select'].forEach(v => {
-    document.getElementById(`view-${v}`).classList.toggle('hidden', v !== name);
+  ['login', 'select'].forEach(v => {
+    $(`view-${v}`).classList.toggle('hidden', v !== name);
   });
 }
 
@@ -50,7 +51,7 @@ $('form-login').addEventListener('submit', async e => {
   const password = $('password').value;
   try {
     await api('POST', '/api/login', { username, password });
-    showView('upload');
+    enterApp();
   } catch (err) {
     showError('login-error', err.message);
   }
@@ -64,176 +65,216 @@ async function logout() {
 }
 
 $('btn-logout').addEventListener('click', logout);
-$('btn-logout2').addEventListener('click', logout);
 
-/* ── Check auth on load ─────────────────────────────────────────────── */
+/* ── Bootstrap ──────────────────────────────────────────────────────── */
 (async () => {
   try {
     await api('GET', '/api/me');
-    showView('upload');
+    enterApp();
   } catch {
     showView('login');
   }
 })();
 
-/* ── Upload ─────────────────────────────────────────────────────────── */
-const dropZone = $('drop-zone');
-const fileInput = $('file-input');
-
-dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
-dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
-dropZone.addEventListener('drop', e => {
-  e.preventDefault();
-  dropZone.classList.remove('dragover');
-  const file = e.dataTransfer.files[0];
-  if (file) uploadFile(file);
-});
-dropZone.addEventListener('click', () => fileInput.click());
-fileInput.addEventListener('change', () => {
-  if (fileInput.files[0]) uploadFile(fileInput.files[0]);
-});
-
-async function uploadFile(file) {
-  if (!file.name.endsWith('.docx')) {
-    showError('upload-error', 'Seuls les fichiers .docx sont acceptés.');
-    return;
-  }
-  clearError('upload-error');
-  show('upload-loading');
-  dropZone.style.pointerEvents = 'none';
-
-  const form = new FormData();
-  form.append('file', file);
-
+async function enterApp() {
+  showView('select');
+  show('loading-structure');
+  hide('content-pane');
   try {
-    const res = await api('POST', '/api/upload', form);
-    const data = await res.json();
-    state.sessionId = data.session_id;
-    state.structure = data.structure;
-    state.filename = file.name;
-    renderChapterList();
-    showView('select');
-    $('filename-label').textContent = file.name;
+    const res = await api('GET', '/api/structure');
+    state.structure = await res.json();
+    buildIndex();
+    renderTree();
+    renderAnnexes();
+    selectAll();
+    hide('loading-structure');
+    show('content-pane');
   } catch (err) {
-    showError('upload-error', err.message);
-  } finally {
-    hide('upload-loading');
-    dropZone.style.pointerEvents = '';
-    fileInput.value = '';
+    showError('generate-error', `Impossible de charger la structure : ${err.message}`);
+    hide('loading-structure');
   }
 }
 
-/* ── Chapter list ───────────────────────────────────────────────────── */
-function renderChapterList() {
-  const container = $('chapter-list');
-  container.innerHTML = '';
-  state.selected.clear();
-
-  // Pré-sélectionner tout
-  state.structure.forEach(item => {
-    if (item.type !== 'section') state.selected.add(item.id);
-  });
-
-  // Grouper par section
-  let currentGroup = null;
-  let currentSection = null;
-
-  state.structure.forEach(item => {
-    if (item.type === 'section') {
-      currentSection = item.label;
-      currentGroup = null;
-      return;
-    }
-
-    // Créer un groupe si nécessaire
-    if (!currentGroup || currentGroup.dataset.section !== currentSection) {
-      const groupEl = document.createElement('div');
-      groupEl.className = 'section-group';
-      groupEl.dataset.section = currentSection || '';
-
-      if (currentSection) {
-        const label = document.createElement('div');
-        label.className = 'section-label';
-        label.textContent = currentSection;
-        groupEl.appendChild(label);
+/* ── Index parent/enfant pour la cascade ────────────────────────────── */
+function buildIndex() {
+  state.parentOf.clear();
+  state.childrenOf.clear();
+  for (const sec of state.structure.sections) {
+    for (const h1 of sec.chapters || []) {
+      state.childrenOf.set(h1.id, []);
+      for (const h2 of h1.children || []) {
+        state.parentOf.set(h2.id, h1.id);
+        state.childrenOf.get(h1.id).push(h2.id);
+        state.childrenOf.set(h2.id, []);
+        for (const h3 of h2.children || []) {
+          state.parentOf.set(h3.id, h2.id);
+          state.childrenOf.get(h2.id).push(h3.id);
+        }
       }
-      container.appendChild(groupEl);
-      currentGroup = groupEl;
     }
-
-    currentGroup.appendChild(buildItem(item));
-  });
-
-  updateCount();
+  }
 }
 
-function buildItem(item) {
+/* ── Rendu de l'arbre ───────────────────────────────────────────────── */
+function renderTree() {
+  const root = $('chapter-tree');
+  root.innerHTML = '';
+  for (const sec of state.structure.sections) {
+    if (!sec.chapters || sec.chapters.length === 0) continue; // TOC : on n'affiche pas
+    const groupEl = document.createElement('div');
+    groupEl.className = 'section-group';
+
+    const lbl = document.createElement('div');
+    lbl.className = 'section-label';
+    lbl.textContent = sec.label;
+    groupEl.appendChild(lbl);
+
+    for (const h1 of sec.chapters) {
+      groupEl.appendChild(buildChapterNode(h1, 1));
+    }
+    root.appendChild(groupEl);
+  }
+}
+
+function buildChapterNode(node, level) {
+  const wrap = document.createElement('div');
+  wrap.className = `tree-node level-${level}`;
+
   const row = document.createElement('label');
-  row.className = 'chapter-item selected';
-  row.dataset.id = item.id;
+  row.className = 'chapter-item';
+  row.dataset.id = node.id;
 
   const cb = document.createElement('input');
   cb.type = 'checkbox';
-  cb.checked = true;
-  cb.dataset.id = item.id;
-
-  const badge = document.createElement('span');
-  badge.className = item.type === 'annex' ? 'chapter-num annex' : 'chapter-num';
-  badge.textContent = item.type === 'annex' ? `A${item.num}` : item.num;
+  cb.dataset.id = node.id;
+  cb.addEventListener('change', () => onChapterToggle(node.id, cb.checked));
 
   const lbl = document.createElement('span');
   lbl.className = 'chapter-label';
-  lbl.textContent = item.label;
-
-  cb.addEventListener('change', () => toggleItem(item.id, cb.checked, row));
+  lbl.textContent = node.label;
 
   row.appendChild(cb);
-  row.appendChild(badge);
   row.appendChild(lbl);
-  return row;
-}
+  wrap.appendChild(row);
 
-function toggleItem(id, checked, row) {
-  if (checked) {
-    state.selected.add(id);
-    row.classList.add('selected');
-  } else {
-    state.selected.delete(id);
-    row.classList.remove('selected');
+  for (const child of node.children || []) {
+    wrap.appendChild(buildChapterNode(child, level + 1));
   }
+  return wrap;
+}
+
+function renderAnnexes() {
+  const root = $('annex-list');
+  root.innerHTML = '';
+  for (const a of state.structure.annexes) {
+    const row = document.createElement('label');
+    row.className = 'chapter-item annex-row';
+    row.dataset.num = a.num;
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.dataset.num = a.num;
+    cb.addEventListener('change', () => onAnnexToggle(a.num, cb.checked));
+
+    const badge = document.createElement('span');
+    badge.className = 'chapter-num annex';
+    badge.textContent = `A${a.num}`;
+
+    const lbl = document.createElement('span');
+    lbl.className = 'chapter-label';
+    lbl.textContent = a.label;
+
+    row.appendChild(cb);
+    row.appendChild(badge);
+    row.appendChild(lbl);
+    root.appendChild(row);
+  }
+}
+
+/* ── Cascade ────────────────────────────────────────────────────────── */
+function onChapterToggle(id, checked) {
+  if (checked) {
+    state.chapters.add(id);
+    // Cascade descendante : cocher tous les enfants
+    for (const child of descendants(id)) state.chapters.add(child);
+    // Cascade montante : forcer les ancêtres cochés
+    for (let p = state.parentOf.get(id); p; p = state.parentOf.get(p)) {
+      state.chapters.add(p);
+    }
+  } else {
+    state.chapters.delete(id);
+    // Cascade descendante : décocher tous les enfants
+    for (const child of descendants(id)) state.chapters.delete(child);
+  }
+  syncChaptersToDOM();
   updateCount();
 }
 
+function onAnnexToggle(num, checked) {
+  if (checked) state.annexes.add(num);
+  else state.annexes.delete(num);
+  updateCount();
+}
+
+function descendants(id) {
+  const out = [];
+  const stack = [...(state.childrenOf.get(id) || [])];
+  while (stack.length) {
+    const x = stack.pop();
+    out.push(x);
+    for (const c of state.childrenOf.get(x) || []) stack.push(c);
+  }
+  return out;
+}
+
+function syncChaptersToDOM() {
+  document.querySelectorAll('#chapter-tree input[type="checkbox"]').forEach(cb => {
+    const id = cb.dataset.id;
+    const on = state.chapters.has(id);
+    cb.checked = on;
+    cb.closest('.chapter-item').classList.toggle('selected', on);
+  });
+}
+
+function syncAnnexesToDOM() {
+  document.querySelectorAll('#annex-list input[type="checkbox"]').forEach(cb => {
+    const num = parseInt(cb.dataset.num, 10);
+    const on = state.annexes.has(num);
+    cb.checked = on;
+    cb.closest('.chapter-item').classList.toggle('selected', on);
+  });
+}
+
+/* ── Compteurs / actions globales ───────────────────────────────────── */
 function updateCount() {
-  const n = state.selected.size;
+  // On compte uniquement les "feuilles" et les annexes pour donner un nombre parlant
+  const leafChapters = [...state.chapters].filter(id => !(state.childrenOf.get(id)?.length));
+  const n = leafChapters.length + state.annexes.size;
   $('count-label').textContent = `${n} élément${n > 1 ? 's' : ''} sélectionné${n > 1 ? 's' : ''}`;
-  $('btn-generate').disabled = n === 0;
+  $('btn-generate').disabled = state.chapters.size === 0 && state.annexes.size === 0;
 }
 
-$('btn-select-all').addEventListener('click', () => {
-  document.querySelectorAll('.chapter-item input[type="checkbox"]').forEach(cb => {
-    cb.checked = true;
-    state.selected.add(cb.dataset.id);
-    cb.closest('.chapter-item').classList.add('selected');
-  });
+function selectAll() {
+  state.chapters.clear();
+  for (const id of state.parentOf.keys()) state.chapters.add(id);
+  for (const id of state.childrenOf.keys()) state.chapters.add(id);
+  state.annexes.clear();
+  for (const a of state.structure.annexes) state.annexes.add(a.num);
+  syncChaptersToDOM();
+  syncAnnexesToDOM();
   updateCount();
-});
+}
 
-$('btn-deselect-all').addEventListener('click', () => {
-  document.querySelectorAll('.chapter-item input[type="checkbox"]').forEach(cb => {
-    cb.checked = false;
-    state.selected.delete(cb.dataset.id);
-    cb.closest('.chapter-item').classList.remove('selected');
-  });
+function deselectAll() {
+  state.chapters.clear();
+  state.annexes.clear();
+  syncChaptersToDOM();
+  syncAnnexesToDOM();
   updateCount();
-});
+}
 
-$('btn-new-file').addEventListener('click', () => {
-  state.sessionId = null;
-  state.structure = [];
-  state.selected.clear();
-  showView('upload');
-});
+$('btn-select-all').addEventListener('click', selectAll);
+$('btn-deselect-all').addEventListener('click', deselectAll);
 
 /* ── Generate ───────────────────────────────────────────────────────── */
 $('btn-generate').addEventListener('click', async () => {
@@ -243,11 +284,9 @@ $('btn-generate').addEventListener('click', async () => {
 
   try {
     const res = await api('POST', '/api/generate', {
-      session_id: state.sessionId,
-      selected_ids: [...state.selected],
+      chapters: [...state.chapters],
+      annexes: [...state.annexes],
     });
-
-    // Déclencher le téléchargement
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -259,6 +298,6 @@ $('btn-generate').addEventListener('click', async () => {
     showError('generate-error', err.message);
   } finally {
     hide('generate-loading');
-    $('btn-generate').disabled = state.selected.size === 0;
+    updateCount();
   }
 });

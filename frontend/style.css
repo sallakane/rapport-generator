@@ -252,6 +252,41 @@ h1 { font-size: 1.5rem; font-weight: 700; color: var(--blue-dk); margin-bottom: 
 
 .chapter-label { flex: 1; font-size: .92rem; line-height: 1.4; }
 
+/* ── Tree (hiérarchie chapitres) ──────────────────────────────────── */
+.tree-node.level-1 { margin-top: .15rem; }
+.tree-node.level-2 { padding-left: 1.6rem; }
+.tree-node.level-3 { padding-left: 3.2rem; }
+
+.tree-node.level-1 > .chapter-item {
+  font-weight: 600;
+  color: var(--text);
+}
+.tree-node.level-2 > .chapter-item {
+  font-weight: 500;
+  color: var(--text);
+}
+.tree-node.level-3 > .chapter-item {
+  font-weight: 400;
+  color: var(--muted);
+}
+.tree-node.level-3 > .chapter-item .chapter-label {
+  font-size: .88rem;
+}
+
+/* ── Bloc annexes ─────────────────────────────────────────────────── */
+.annex-block {
+  margin-top: 2.5rem;
+  border-top: 1px solid var(--border);
+  padding-top: 1.5rem;
+}
+.block-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--blue-dk);
+  margin-bottom: .9rem;
+}
+.annex-row .chapter-num.annex { background: var(--blue-dk); }
+
 /* ── Generate bar ─────────────────────────────────────────────────── */
 .generate-bar {
   position: sticky;

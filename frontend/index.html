@@ -29,51 +29,36 @@
     </div>
   </div>
 
-  <!-- ── UPLOAD ────────────────────────────────────────────────── -->
-  <div id="view-upload" class="view hidden">
+  <!-- ── SÉLECTION ─────────────────────────────────────────────── -->
+  <div id="view-select" class="view hidden">
     <header class="topbar">
       <div class="logo">ATLANTIS<span>GEO</span></div>
       <button id="btn-logout" class="btn-ghost">Déconnexion</button>
     </header>
     <main class="container">
-      <h1>Sélection des chapitres</h1>
-      <p class="subtitle">Uploadez votre modèle Word pour sélectionner les chapitres à conserver.</p>
-      <div id="drop-zone" class="drop-zone">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <path d="M12 16V4m0 0L8 8m4-4 4 4M4 20h16"/>
-        </svg>
-        <p>Glissez un fichier <strong>.docx</strong> ici</p>
-        <p class="hint">ou</p>
-        <label class="btn-secondary" for="file-input">Parcourir</label>
-        <input id="file-input" type="file" accept=".docx" hidden />
-      </div>
-      <div id="upload-error" class="error hidden"></div>
-      <div id="upload-loading" class="loading hidden">
-        <span class="spinner"></span> Analyse du document…
-      </div>
-    </main>
-  </div>
-
-  <!-- ── SÉLECTION ─────────────────────────────────────────────── -->
-  <div id="view-select" class="view hidden">
-    <header class="topbar">
-      <div class="logo">ATLANTIS<span>GEO</span></div>
-      <button id="btn-logout2" class="btn-ghost">Déconnexion</button>
-    </header>
-    <main class="container">
       <div class="select-header">
         <div>
-          <h1>Choisissez les chapitres</h1>
-          <p class="subtitle" id="filename-label"></p>
+          <h1>Sélection des chapitres</h1>
+          <p class="subtitle">Cochez ce que vous voulez conserver dans le rapport généré.</p>
         </div>
         <div class="select-actions">
           <button id="btn-select-all" class="btn-ghost">Tout sélectionner</button>
           <button id="btn-deselect-all" class="btn-ghost">Tout désélectionner</button>
-          <button id="btn-new-file" class="btn-ghost">Nouveau fichier</button>
         </div>
       </div>
 
-      <div id="chapter-list"></div>
+      <div id="loading-structure" class="loading">
+        <span class="spinner"></span> Chargement de la structure…
+      </div>
+
+      <div id="content-pane" class="hidden">
+        <div id="chapter-tree"></div>
+
+        <div class="annex-block">
+          <h2 class="block-title">Annexes</h2>
+          <div id="annex-list"></div>
+        </div>
+      </div>
 
       <div class="generate-bar">
         <span id="count-label">0 élément(s) sélectionné(s)</span>

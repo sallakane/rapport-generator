@@ -1,117 +1,162 @@
 # DOCX Chapter Filter — Contexte projet pour Claude
 
 ## Objectif
-Application web permettant à un utilisateur d'uploader un fichier `.docx` (modèle de rapport géotechnique ATLANTIS), de sélectionner les chapitres et annexes à conserver via des cases à cocher, puis de télécharger un nouveau `.docx` avec exactement la même mise en forme (header, footer, styles) mais uniquement les sections choisies.
+Application web qui prend en entrée un **modèle figé** (`modele_word_atlantis.docx` à la racine), affiche sa structure hiérarchique sous forme de cases à cocher (Title → Heading1 → Heading2 → Heading3) ainsi que la liste des annexes en parallèle, puis génère un `.docx` ne contenant que les éléments cochés — avec exactement la même mise en forme (header, footer, styles, orientation portrait/paysage) que le modèle.
 
 ## Genèse
-Le script `filter_chapters.py` (à la racine) est le prototype fonctionnel de la logique métier. Il a été utilisé pour filtrer `Modele_Word_ATLANTIS.docx` → `Modele_Word_ATLANTIS_filtered.docx`. C'est la base du backend.
+Le script `filter_chapters.py` (à la racine) est le prototype historique. La logique a été portée puis étendue dans `backend/filter.py` pour gérer :
+- la hiérarchie complète Title/Heading1/Heading2/Heading3 (3 niveaux cochables) ;
+- la préservation stricte des sectPr inline (pour ne pas casser les pages paysage) ;
+- la **renumérotation automatique** des annexes conservées (1, 5, 7 → 1, 2, 3 dans le doc final).
 
 ## Stack technique
 - **Backend** : FastAPI (Python 3.12) — API REST, traitement fichiers .docx via lxml + scripts skill docx
-- **Frontend** : HTML + vanilla JS (pas de framework) — upload, liste de checkboxes, téléchargement
+- **Frontend** : HTML + vanilla JS (pas de framework) — arbre de checkboxes hiérarchique + bloc annexes
 - **Reverse proxy** : Caddy (VPS déjà configuré)
-- **Skill docx** : `skills/skills/docx/scripts/` — scripts `unpack.py` et `pack.py` pour décompresser/recompresser le .docx
-- **Dépendances Python** : `fastapi`, `uvicorn`, `lxml`, `defusedxml`, `python-multipart`
+- **Skill docx** : `backend/docx_scripts/office/` — scripts `unpack.py` et `pack.py` pour décompresser/recompresser le .docx
+- **Dépendances Python** : `fastapi`, `uvicorn`, `lxml`, `defusedxml`, `itsdangerous`, `python-dotenv`
 
 ## Architecture du projet
 
 ```
 rapport-generator/
-├── CLAUDE.md                      ← ce fichier
+├── CLAUDE.md                       ← ce fichier
+├── modele_word_atlantis.docx       ← MODÈLE FIGÉ — base de tous les traitements
 ├── backend/
-│   ├── main.py                    ← FastAPI app (endpoints)
-│   ├── extractor.py               ← extraction chapitres/annexes depuis .docx
-│   ├── filter.py                  ← filtrage XML + repack (issu de filter_chapters.py)
+│   ├── main.py                     ← FastAPI (cache du modèle au startup)
+│   ├── extractor.py                ← parse(docx_path) + analyze(body) — hiérarchie + annexes
+│   ├── filter.py                   ← filtrage XML + sectPr + renum annexes + repack
+│   ├── docx_scripts/office/        ← scripts unpack.py / pack.py
 │   ├── requirements.txt
-│   ├── .env                       ← identifiants (gitignored)
-│   └── tmp/                       ← stockage temporaire (gitignored)
+│   ├── .env                        ← identifiants (gitignored)
+│   └── tmp/                        ← jobs de génération (gitignored, cleanup auto)
 ├── frontend/
-│   ├── index.html                 ← interface unique (upload → checkboxes → download)
+│   ├── index.html                  ← login + vue sélection (plus de vue upload)
 │   ├── style.css
 │   └── app.js
 ├── infra/
-│   ├── rapport-generator.service  ← service systemd (copié dans /etc/systemd/system/)
-│   └── Caddyfile.patch            ← Caddyfile complet du VPS (référence)
-├── venv/                          ← virtualenv Python (gitignored)
-├── skills/                        ← skill docx (déjà présent, ne pas modifier)
-├── filter_chapters.py             ← prototype original (référence)
+│   ├── rapport-generator.service   ← service systemd
+│   └── Caddyfile.patch             ← Caddyfile du VPS (référence)
+├── venv/                           ← virtualenv Python (gitignored)
+├── skills/                         ← skill docx (référence)
+├── filter_chapters.py              ← prototype original
 └── .gitignore
 ```
 
+## Convention de styles (modèle ATLANTIS actuel)
+
+Le modèle utilise les **styles standards anglais** (et non `Titre`/`Titre1`/`Titreannexes` comme dans la version précédente) :
+
+- `Title`    → section principale (TITRE EN MAJUSCULES) — **non cochable**, regroupement visuel uniquement
+- `Heading1` → chapitre — cochable
+- `Heading2` → sous-chapitre — cochable
+- `Heading3` → sous-sous-chapitre — cochable (profondeur max ; pas de Heading4 dans le modèle)
+
+**Annexes** : aucun style spécifique. Détectées par regex sur le texte du paragraphe :
+```
+^Annexe\s*n[°º]\s*(\d+)
+```
+(ex. `Annexe n°5Coupe(s) du/des sondage(s)…` ; le label suit le numéro sans séparateur).
+
 ## API Backend — Endpoints
 
-### POST /upload
-- Reçoit : fichier `.docx` (multipart/form-data)
-- Traitement : décompresse le .docx, extrait tous les titres Titre/Titre1/Titreannexes
-- Retourne :
+Toutes les routes (sauf `/api/login` et `/api/health`) requièrent un cookie de session valide.
+
+### POST /api/login — `{ username, password }` → `{ ok: true }` (cookie `session` posé)
+### POST /api/logout
+### GET  /api/me → `{ user }`
+
+### GET /api/structure
+Renvoie l'arbre du modèle (mis en cache au startup) :
 ```json
 {
-  "session_id": "uuid",
   "sections": [
-    { "id": "section_0", "type": "section", "label": "INTRODUCTION" },
-    { "id": "ch_1", "type": "chapter", "num": 1, "label": "Mission confiée", "section": "INTRODUCTION" },
-    { "id": "annex_1", "type": "annex", "num": 1, "label": "Annexe n°1 — NF P 94-500" }
+    {
+      "id": "section_2",
+      "label": "INTRODUCTION",
+      "chapters": [
+        {
+          "id": "h1_1",
+          "label": "Mission confiée",
+          "children": [
+            { "id": "h2_1", "label": "...", "children": [
+              { "id": "h3_1", "label": "..." }
+            ]}
+          ]
+        }
+      ]
+    }
+  ],
+  "annexes": [
+    { "id": "annex_1", "num": 1, "label": "Extrait de la norme NF P 94-500" }
   ]
 }
 ```
 
-### POST /generate
-- Reçoit :
-```json
-{ "session_id": "uuid", "selected_ids": ["ch_1", "ch_2", "annex_1", ...] }
-```
-- Traitement : filtre le .docx selon la sélection, repack
-- Retourne : fichier `.docx` en téléchargement direct
+Les sections sans `chapters` (TOC type SOMMAIRE / table des annexes en début de doc) sont incluses dans la réponse mais filtrées côté frontend ; elles sont **toujours conservées** dans le doc généré (Q1 = (a) : on garde le sommaire figé, Word le rafraîchira à l'ouverture si besoin).
 
-### GET /health
-- Retourne `{ "status": "ok" }` — utilisé par Caddy/monitoring
+### POST /api/generate — `{ chapters: ["h1_1","h2_3",...], annexes: [1, 5, 7] }`
+Renvoie le `.docx` filtré en téléchargement direct.
+La cohérence parent/enfant (cascade) est garantie côté frontend ; le backend reçoit déjà une liste cohérente.
+
+### GET /api/health → `{ status: "ok" }`
 
 ## Logique d'extraction (extractor.py)
 
-Styles reconnus :
-- `Titre` → section principale (non coché, toujours conservé si au moins un enfant coché)
-- `Titre1` → chapitre (coché individuellement)
-- `Titre2`, `Titre3` → sous-chapitres (toujours conservés avec leur chapitre parent)
-- `Titreannexes` → annexe (cochée individuellement)
+`parse(docx_path)` ouvre le zip, parse `document.xml`, appelle `analyze(body)`.
+`analyze(body)` retourne un `ParsedDoc` avec :
+- `sections` : arbre `Title → Heading1 → Heading2 → Heading3`
+- `annexes` : liste plate `[{id, num, label}]`
+- `owners[i]` : pour chaque enfant du body, un tuple disant à quel nœud il appartient :
+  - `('cover',)` — page de garde (avant le 1er Title)
+  - `('section', idx)` — paragraphe Title lui-même
+  - `('h1'|'h2'|'h3', n)` — paragraphe d'un chapitre, ou contenu non-titre rattaché au plus profond actif
+  - `('annex', num)` — paragraphe d'une annexe (numéro original)
 
-Numérotation automatique des Titre1 de 1 à N (ordre d'apparition dans le body).
+Cette table d'owners est partagée avec `filter.py` pour décider quoi garder/supprimer.
 
 ## Logique de filtrage (filter.py)
 
-Identique à `filter_chapters.py` :
-1. Lire `document.xml` avec lxml (préserve les namespaces)
-2. Numéroter les Titre1 (chapitres)
-3. Pour chaque enfant du body : supprimer si appartient à un chapitre non sélectionné
-4. Conserver les Titre-sections même si certains de leurs chapitres sont supprimés
-5. Réécrire `document.xml` avec lxml
-6. Repack via `skills/skills/docx/scripts/office/pack.py`
+1. Unpack du `.docx` (skill `office/unpack.py`).
+2. Parse `document.xml` (lxml).
+3. Recalcule la table `owners` via `extractor.analyze(body)`.
+4. Décide pour chaque enfant du body s'il est **conservé** :
+   - Page de garde : toujours.
+   - Title : conservé si la section a au moins un chapter sélectionné, OU si la section n'a aucun chapter (cas des TOC, toujours préservées).
+   - Heading1/2/3 : conservé si son id est dans `selected_chapters`.
+   - Annexe : conservée si son numéro est dans `selected_annexes`.
+5. **Override sectPr** : un paragraphe portant un `<w:sectPr>` inline qui devait être supprimé est forcé conservé si sa section englobe au moins un paragraphe conservé. Ses runs sont vidés (`_clear_runs_keep_pPr`) pour ne pas réintroduire de texte parasite. Préserve l'orientation paysage.
+6. **Renumérotation des annexes** : pour chaque paragraphe d'annexe conservé, on remappe `Annexe n°<old>` → `Annexe n°<new>` selon l'ordre des annexes conservées (1, 2, 3…). Tentative de remplacement dans un `<w:t>` unique d'abord, fallback cross-run (concatène, remplace, remet tout dans le 1er run).
+7. Suppression des enfants marqués (en ordre décroissant pour ne pas perturber les indices).
+8. `_fix_rels` neutralise les `Target="file:///..."` Windows et `Target="about:blank"` (rejetés par le validateur du skill `pack.py`).
+9. Réécrit `document.xml` et repack via `office/pack.py`.
+
+**Limitation v1 — assumée** : les références textuelles "voir annexe n°5" dans le corps du doc ne sont **pas** remappées (Q2 = (a)). Si l'annexe 5 devient l'annexe 2, le texte continuera de pointer vers "n°5". À éventuellement traiter en v2.
+
+## Cache du modèle
+Le modèle est parsé **une seule fois** au startup (`@app.on_event('startup')`) et la structure exposée par `/api/structure` est servie depuis `_MODEL_STRUCTURE` en mémoire. À chaque appel `/api/generate`, le filtrage repart d'un unpack frais dans un dossier `backend/tmp/<job_uuid>/`.
 
 ## Nettoyage des fichiers temporaires
-- Chaque session crée un dossier `backend/tmp/<session_id>/`
-- Nettoyage automatique après 30 minutes (via `asyncio` background task)
+- Chaque génération crée `backend/tmp/<job_id>/unpacked/` + `<job_id>/output.docx`
+- Boucle asyncio toutes les 10 min : supprime les dossiers de plus de 30 min
 
 ## Authentification
 
 L'application est un intranet privé — pas de référencement Google, accès restreint.
 
 ### Stratégie retenue : session token simple
-- Page `/login` avec formulaire user/password
-- Identifiants stockés dans `.env` (`APP_USER`, `APP_PASSWORD`) — jamais dans le code
-- À la connexion réussie : cookie de session signé (via `itsdangerous` ou `fastapi-sessions`)
-- Toutes les routes API vérifient le cookie, retournent 401 sinon
-- Le frontend redirige vers `/login` si 401
+- Page de login (vanilla JS) avec formulaire user/password
+- Identifiants stockés dans `backend/.env` (`APP_USER`, `APP_PASSWORD`) — jamais dans le code
+- À la connexion réussie : cookie `session` signé via `itsdangerous` (`URLSafeTimedSerializer`), httpOnly, samesite=lax, max-age 8 h
+- Toutes les routes API vérifient le cookie via la dépendance `require_auth`, retournent 401 sinon
+- Le frontend redirige vers la vue login si 401 sur `/api/me`
 
 ### No-index (ne pas apparaître sur Google)
-Ajout d'un header HTTP dans Caddy :
+Header HTTP dans Caddy :
 ```
 header X-Robots-Tag "noindex, nofollow"
 ```
-
-### Dépendances supplémentaires pour l'auth
-```
-itsdangerous==2.2.0   # signature des cookies de session
-python-dotenv==1.0.0  # lecture du .env
-```
+Plus `<meta name="robots" content="noindex, nofollow" />` côté HTML.
 
 ---
 
@@ -159,9 +204,6 @@ sudo systemctl restart rapport-generator
 
 ### Configuration Caddy
 
-Le Caddyfile complet du VPS est versionné dans `infra/Caddyfile.patch` (référence).
-Chemin réel sur le serveur : `/etc/caddy/Caddyfile`
-
 ```
 ag-rapport-generator.fr {
     header X-Robots-Tag "noindex, nofollow"
@@ -175,16 +217,17 @@ sudo systemctl reload caddy
 ```
 
 ## Points de vigilance
-- Les fichiers .docx uploadés peuvent être lourds (le modèle ATLANTIS fait 18 Mo)
-- Le skill `pack.py` nécessite `lxml` et `defusedxml` installés
-- La détection des styles est calée sur les conventions ATLANTIS (`Titre`, `Titre1`, `Titreannexes`). Pour des documents tiers, ajouter une détection fallback sur `Heading1`, `Heading2`, etc.
-- Ne jamais committer les fichiers dans `backend/tmp/`
+- Le modèle pèse ~19 Mo (essentiellement des images). Le doc généré reste de cet ordre tant qu'on garde des chapitres avec images.
+- Le skill `pack.py` valide les rels et rejette `file:///` et `about:blank` — `_fix_rels` les neutralise systématiquement.
+- La détection des styles est calée sur `Title`/`Heading1`/`Heading2`/`Heading3`. Si on remplace le modèle par un doc utilisant `Titre`/`Titre1`, il faudra ré-étendre `extractor.py`.
+- Une seule zone paysage dans le modèle actuel (mini-section "Légende EM…" dans Synthèse pressiométrique). Le mécanisme d'override sectPr est prêt si d'autres apparaissent.
+- Ne jamais committer les fichiers dans `backend/tmp/`.
 
 ## Ordre de développement
 1. [x] Prototype logique métier (`filter_chapters.py`)
-2. [x] `backend/extractor.py` — extraction des chapitres
-3. [x] `backend/filter.py` — filtrage + repack (portage de filter_chapters.py)
-4. [x] `backend/main.py` — FastAPI avec les 3 endpoints
-5. [x] `frontend/index.html` + `app.js` + `style.css`
-6. [ ] Tests manuels en local
+2. [x] `backend/extractor.py` — extraction hiérarchique + annexes par regex
+3. [x] `backend/filter.py` — filtrage + sectPr + renumérotation annexes
+4. [x] `backend/main.py` — FastAPI, cache modèle au startup, plus de /api/upload
+5. [x] `frontend/index.html` + `app.js` + `style.css` — arbre + bloc annexes + cascade
+6. [ ] Tests manuels en local (uvicorn + Word desktop)
 7. [x] Déploiement VPS + configuration Caddy (`ag-rapport-generator.fr`)

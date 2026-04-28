@@ -7,13 +7,13 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from pydantic import BaseModel
 
-from extractor import extract_structure
+from extractor import parse, to_api_structure
 from filter import filter_document
 
 load_dotenv()
@@ -21,15 +21,19 @@ load_dotenv()
 APP_USER = os.getenv('APP_USER', 'admin')
 APP_PASSWORD = os.getenv('APP_PASSWORD', 'changeme')
 SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-prod')
-SESSION_MAX_AGE = 3600 * 8  # 8 heures
+SESSION_MAX_AGE = 3600 * 8
 
+ROOT = Path(__file__).parent.parent
+MODEL_PATH = ROOT / 'modele_word_atlantis.docx'
 TMP_DIR = Path(__file__).parent / 'tmp'
 TMP_DIR.mkdir(exist_ok=True)
+FRONTEND_DIR = ROOT / 'frontend'
 
-FRONTEND_DIR = Path(__file__).parent.parent / 'frontend'
-
-app = FastAPI(docs_url=None, redoc_url=None)  # pas de swagger public
+app = FastAPI(docs_url=None, redoc_url=None)
 serializer = URLSafeTimedSerializer(SECRET_KEY)
+
+# Cache du modèle figé : parsé une fois au startup, exposé via /api/structure
+_MODEL_STRUCTURE: dict | None = None
 
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
@@ -60,7 +64,7 @@ def require_auth(request: Request) -> str:
     return user
 
 
-# ── Nettoyage automatique des sessions tmp (toutes les 10 min) ───────────────
+# ── Nettoyage automatique des fichiers de génération (toutes les 10 min) ─────
 
 async def _cleanup_loop():
     while True:
@@ -75,6 +79,11 @@ async def _cleanup_loop():
 
 @app.on_event('startup')
 async def startup():
+    global _MODEL_STRUCTURE
+    if not MODEL_PATH.exists():
+        raise RuntimeError(f'Modèle introuvable : {MODEL_PATH}')
+    parsed = parse(str(MODEL_PATH))
+    _MODEL_STRUCTURE = to_api_structure(parsed)
     asyncio.create_task(_cleanup_loop())
 
 
@@ -104,77 +113,43 @@ def me(user: str = Depends(require_auth)):
     return {'user': user}
 
 
-# ── Routes document ───────────────────────────────────────────────────────────
+# ── Routes document ──────────────────────────────────────────────────────────
 
-@app.post('/api/upload')
-async def upload(
-    file: UploadFile = File(...),
-    user: str = Depends(require_auth),
-):
-    if not file.filename.endswith('.docx'):
-        raise HTTPException(status_code=400, detail='Seuls les fichiers .docx sont acceptés')
-
-    session_id = str(uuid.uuid4())
-    session_dir = TMP_DIR / session_id
-    session_dir.mkdir()
-
-    docx_path = session_dir / 'original.docx'
-    content = await file.read()
-    docx_path.write_bytes(content)
-
-    try:
-        structure = extract_structure(str(docx_path))
-    except Exception as e:
-        shutil.rmtree(session_dir, ignore_errors=True)
-        raise HTTPException(status_code=400, detail=f'Impossible de lire le document : {e}')
-
-    return {'session_id': session_id, 'structure': structure}
+@app.get('/api/structure')
+def structure(user: str = Depends(require_auth)):
+    return _MODEL_STRUCTURE
 
 
 class GenerateBody(BaseModel):
-    session_id: str
-    selected_ids: list[str]
+    chapters: list[str]   # ids cochés (h1_*, h2_*, h3_*) — cohérence garantie par le frontend
+    annexes: list[int]    # numéros originaux d'annexes
 
 
 @app.post('/api/generate')
 def generate(body: GenerateBody, user: str = Depends(require_auth)):
-    session_dir = TMP_DIR / body.session_id
-    if not session_dir.exists():
-        raise HTTPException(status_code=404, detail='Session expirée ou introuvable')
-
-    # Parser les IDs sélectionnés
-    selected_chapters: set[int] = set()
-    selected_annexes: set[int] = set()
-
-    for sid in body.selected_ids:
-        if sid.startswith('ch_'):
-            try:
-                selected_chapters.add(int(sid.split('_')[1]))
-            except ValueError:
-                pass
-        elif sid.startswith('annex_'):
-            try:
-                selected_annexes.add(int(sid.split('_')[1]))
-            except ValueError:
-                pass
+    selected_chapters = set(body.chapters)
+    selected_annexes = set(body.annexes)
 
     if not selected_chapters and not selected_annexes:
         raise HTTPException(status_code=400, detail='Aucun chapitre ou annexe sélectionné')
 
-    docx_path = str(session_dir / 'original.docx')
-    unpack_dir = str(session_dir / 'unpacked')
-    output_path = str(session_dir / 'output.docx')
+    job_id = str(uuid.uuid4())
+    job_dir = TMP_DIR / job_id
+    job_dir.mkdir()
+    unpack_dir = str(job_dir / 'unpacked')
+    output_path = str(job_dir / 'output.docx')
 
     try:
         filter_document(
-            docx_path=docx_path,
+            docx_path=str(MODEL_PATH),
             selected_chapters=selected_chapters,
             selected_annexes=selected_annexes,
             unpack_dir=unpack_dir,
             output_path=output_path,
         )
     except subprocess.CalledProcessError as e:
-        raise HTTPException(status_code=500, detail=f'Erreur lors du traitement : {e.stderr}')
+        stderr = (e.stderr or b'').decode('utf-8', errors='replace')
+        raise HTTPException(status_code=500, detail=f'Erreur traitement : {stderr[:300]}')
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Erreur inattendue : {e}')
 
@@ -190,5 +165,5 @@ def health():
     return {'status': 'ok'}
 
 
-# ── Frontend statique (monté en dernier) ────────────────────────────────────
+# ── Frontend statique (monté en dernier) ─────────────────────────────────────
 app.mount('/', StaticFiles(directory=str(FRONTEND_DIR), html=True), name='frontend')
