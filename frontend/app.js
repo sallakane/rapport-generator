@@ -86,7 +86,7 @@ async function enterApp() {
     buildIndex();
     renderTree();
     renderAnnexes();
-    selectAll();
+    updateCount();
     hide('loading-structure');
     show('content-pane');
   } catch (err) {
