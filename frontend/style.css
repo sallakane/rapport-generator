@@ -204,6 +204,32 @@ h1 { font-size: 1.5rem; font-weight: 700; color: var(--blue-dk); margin-bottom: 
 }
 .select-actions { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
 
+/* ── Bloc « type de projet » ─────────────────────────────────────────── */
+.preset-block {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .6rem;
+  background: var(--blue-lt);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: .85rem 1rem;
+  margin-bottom: 1.5rem;
+}
+.preset-label { font-size: .85rem; font-weight: 700; color: var(--blue-dk); }
+.preset-select {
+  padding: .5rem .7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--white);
+  color: var(--text);
+  font-size: .9rem;
+  min-width: 16rem;
+  cursor: pointer;
+}
+.preset-select:focus { border-color: var(--accent); outline: none; }
+.preset-hint { font-size: .8rem; color: var(--muted); }
+
 .section-group { margin-bottom: 1.5rem; }
 
 .section-label {

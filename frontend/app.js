@@ -1,10 +1,12 @@
 /* ── State ──────────────────────────────────────────────────────────── */
 const state = {
   structure: null,                  // { sections, annexes }
+  presets: [],                      // [{ id, label, chapters: [...] }]
   chapters: new Set(),              // ids cochés (h1_*, h2_*, h3_*)
   annexes: new Set(),               // numéros cochés
   parentOf: new Map(),              // childId → parentId (h2 → h1, h3 → h2)
   childrenOf: new Map(),            // parentId → [childId...]
+  applyingPreset: false,            // garde : true pendant l'application d'un preset
 };
 
 /* ── DOM helpers ────────────────────────────────────────────────────── */
@@ -86,6 +88,7 @@ async function enterApp() {
     buildIndex();
     renderTree();
     renderAnnexes();
+    await loadPresets();
     updateCount();
     hide('loading-structure');
     show('content-pane');
@@ -114,6 +117,52 @@ function buildIndex() {
     }
   }
 }
+
+/* ── Presets « type de projet » ─────────────────────────────────────── */
+async function loadPresets() {
+  try {
+    const res = await api('GET', '/api/presets');
+    state.presets = (await res.json()).presets || [];
+  } catch {
+    state.presets = [];
+  }
+  const sel = $('preset-select');
+  // On conserve la 1re option « — Sélection libre — » et on ajoute les types
+  for (const p of state.presets) {
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = p.label;
+    sel.appendChild(opt);
+  }
+  if (state.presets.length) show('preset-block');
+}
+
+function applyPreset(id) {
+  const preset = state.presets.find(p => p.id === id);
+  if (!preset) return;
+  state.applyingPreset = true;
+  // Comportement « remplacer » : on repart d'une sélection vierge
+  state.chapters.clear();
+  state.annexes.clear();
+  for (const chId of preset.chapters) {
+    state.chapters.add(chId);
+    // Sécurité cohérence : forcer les ancêtres cochés (le JSON les inclut déjà)
+    for (let p = state.parentOf.get(chId); p; p = state.parentOf.get(p)) {
+      state.chapters.add(p);
+    }
+  }
+  syncChaptersToDOM();
+  syncAnnexesToDOM();
+  updateCount();
+  state.applyingPreset = false;
+}
+
+function resetPresetSelector() {
+  // Toute modification manuelle repasse le sélecteur en « Sélection libre »
+  if (!state.applyingPreset) $('preset-select').value = '';
+}
+
+$('preset-select').addEventListener('change', e => applyPreset(e.target.value));
 
 /* ── Rendu de l'arbre ───────────────────────────────────────────────── */
 function renderTree() {
@@ -207,12 +256,14 @@ function onChapterToggle(id, checked) {
     for (const child of descendants(id)) state.chapters.delete(child);
   }
   syncChaptersToDOM();
+  resetPresetSelector();
   updateCount();
 }
 
 function onAnnexToggle(num, checked) {
   if (checked) state.annexes.add(num);
   else state.annexes.delete(num);
+  resetPresetSelector();
   updateCount();
 }
 
@@ -262,6 +313,7 @@ function selectAll() {
   for (const a of state.structure.annexes) state.annexes.add(a.num);
   syncChaptersToDOM();
   syncAnnexesToDOM();
+  resetPresetSelector();
   updateCount();
 }
 
@@ -270,6 +322,7 @@ function deselectAll() {
   state.annexes.clear();
   syncChaptersToDOM();
   syncAnnexesToDOM();
+  resetPresetSelector();
   updateCount();
 }
 

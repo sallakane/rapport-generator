@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import shutil
 import subprocess
@@ -25,6 +26,7 @@ SESSION_MAX_AGE = 3600 * 8
 
 ROOT = Path(__file__).parent.parent
 MODEL_PATH = ROOT / 'modele_word_atlantis.docx'
+PRESETS_PATH = Path(__file__).parent / 'project_presets.json'
 TMP_DIR = Path(__file__).parent / 'tmp'
 TMP_DIR.mkdir(exist_ok=True)
 FRONTEND_DIR = ROOT / 'frontend'
@@ -34,6 +36,8 @@ serializer = URLSafeTimedSerializer(SECRET_KEY)
 
 # Cache du modèle figé : parsé une fois au startup, exposé via /api/structure
 _MODEL_STRUCTURE: dict | None = None
+# Presets « type de projet » → chapitres pré-cochés, chargés au startup
+_PRESETS: list[dict] = []
 
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
@@ -79,11 +83,13 @@ async def _cleanup_loop():
 
 @app.on_event('startup')
 async def startup():
-    global _MODEL_STRUCTURE
+    global _MODEL_STRUCTURE, _PRESETS
     if not MODEL_PATH.exists():
         raise RuntimeError(f'Modèle introuvable : {MODEL_PATH}')
     parsed = parse(str(MODEL_PATH))
     _MODEL_STRUCTURE = to_api_structure(parsed)
+    if PRESETS_PATH.exists():
+        _PRESETS = json.loads(PRESETS_PATH.read_text(encoding='utf-8')).get('presets', [])
     asyncio.create_task(_cleanup_loop())
 
 
@@ -118,6 +124,12 @@ def me(user: str = Depends(require_auth)):
 @app.get('/api/structure')
 def structure(user: str = Depends(require_auth)):
     return _MODEL_STRUCTURE
+
+
+@app.get('/api/presets')
+def presets(user: str = Depends(require_auth)):
+    """Types de projet prédéfinis → liste d'ids de chapitres à pré-cocher."""
+    return {'presets': _PRESETS}
 
 
 class GenerateBody(BaseModel):
