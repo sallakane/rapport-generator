@@ -168,7 +168,7 @@ def generate(body: GenerateBody, user: str = Depends(require_auth)):
     return FileResponse(
         output_path,
         media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        filename='rapport_filtre.docx',
+        filename='Rapport ATLANTIS R-26XXXXXX P1 V1 Mission GX-XXX VILLE (DP).docx',
     )
 
 
