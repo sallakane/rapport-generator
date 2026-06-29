@@ -292,6 +292,17 @@ function syncChaptersToDOM() {
   });
 }
 
+// Récupère le nom de fichier envoyé par le backend (Content-Disposition),
+// gère `filename*=UTF-8''...` (encodé) et `filename="..."`. Repli sur le défaut.
+function filenameFromResponse(res) {
+  const cd = res.headers.get('Content-Disposition') || '';
+  const star = cd.match(/filename\*\s*=\s*UTF-8''([^;]+)/i);
+  if (star) { try { return decodeURIComponent(star[1]); } catch { /* noop */ } }
+  const plain = cd.match(/filename\s*=\s*"?([^";]+)"?/i);
+  if (plain) return plain[1].trim();
+  return 'Rapport ATLANTIS R-26XXXXXX P1 V1 Mission GX-XXX VILLE (DP).docx';
+}
+
 function syncAnnexesToDOM() {
   document.querySelectorAll('#annex-list input[type="checkbox"]').forEach(cb => {
     const num = parseInt(cb.dataset.num, 10);
@@ -386,7 +397,7 @@ $('btn-generate').addEventListener('click', async () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'rapport_filtre.docx';
+    a.download = filenameFromResponse(res);
     a.click();
     URL.revokeObjectURL(url);
   } catch (err) {
