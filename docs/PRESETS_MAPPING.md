@@ -53,7 +53,7 @@ Options :
 - (b) Cocher `h2_2` « Références » seule (+ parent `h1_2`)
 - (c) Ignorer (ne rien cocher)
 
-RÉPONSE : _______________
+RÉPONSE : a
 
 ### 2. « Agressivité des sols vis-à-vis du béton »
 Présente dans *G2 PRO*. Le modèle a :
@@ -66,7 +66,7 @@ Options :
 - (a) `h3_2` seul (sols uniquement, + parent `h2_29`) ← **défaut appliqué**
 - (b) `h2_29` (section complète : eau + sols + conclusion)
 
-RÉPONSE : _______________
+RÉPONSE : b
 
 ### 3. « Contexte de mitoyenneté entre fondations voisines »
 Présente dans *Maison sans sous-sol*. **Aucun équivalent** dans le modèle.
@@ -77,7 +77,7 @@ Options :
 - (a) Ignorer (ne rien cocher) ← **défaut appliqué**
 - (b) Mapper vers `h1_25`
 
-RÉPONSE : _______________
+RÉPONSE : a
 
 ---
 

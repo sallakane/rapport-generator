@@ -7,8 +7,10 @@ __pycache__/
 .env
 *.docx
 !modele_word_atlantis.docx
+!modele_word_atlantis_new.docx
 !exemple-sommaire.docx
 *.zip
 .venv/
 venv/
 node_modules/
+.idea/
