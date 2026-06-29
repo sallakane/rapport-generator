@@ -44,13 +44,13 @@ OUTPUT_PATH = ROOT / 'backend' / 'project_presets.json'
 # docs/PRESETS_MAPPING.md.
 OVERRIDES_RAW = {
     "Cadre de l’étude": [],                                    # regroupement du sommaire, ignoré
-    "Textes réglementaires": ["h1_2", "h2_1", "h2_2"],         # PENDING
-    "Documents communiqués": ["h1_2", "h2_1", "h2_2"],         # PENDING
+    "Textes réglementaires": ["h1_2", "h2_1", "h2_2"],         # validé : option a (large)
+    "Documents communiqués": ["h1_2", "h2_1", "h2_2"],         # validé : option a (large)
     "Synthèse des essais en laboratoire": ["h1_13"],
     "Identifications G.T.R.": ["h2_18"],
     "Analyses physico-chimiques": ["h2_21"],
     "Masses volumiques": ["h2_25"],
-    "Agressivité des sols vis-à-vis du béton": ["h3_2"],       # PENDING (sols only ; entraîne h2_29 parent)
+    "Agressivité des sols vis-à-vis du béton": ["h3_1", "h3_2", "h3_3"],  # validé : option b (section complète h2_29 : eau + sols + conclusion)
     "Synthèse des fouilles à la pelle mécanique": ["h1_14"],
     "Plateforme des dallages et des voiries": ["h1_23"],
     "Dimensionnement des inclusions rigides": ["h2_54"],
@@ -62,7 +62,7 @@ OVERRIDES_RAW = {
     "Pré-dimensionnement des fondations superficielles": ["h2_53"],
     "Dimensionnent de fondations superficielles": ["h2_53"],   # typo dans l'exemple
     "Estimation des tassements des fondations": ["h3_14"],
-    "Contexte de mitoyenneté entre fondations voisines": [],   # PENDING (ignoré par défaut)
+    "Contexte de mitoyenneté entre fondations voisines": [],   # validé : option a (ignoré)
 }
 
 
