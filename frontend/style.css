@@ -176,6 +176,22 @@ h1 { font-size: 1.5rem; font-weight: 700; color: var(--blue-dk); margin-bottom: 
   padding: .65rem 1rem;
   font-size: .9rem;
 }
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: .7rem;
+  margin-bottom: 1.5rem;
+  padding: .85rem 1.1rem;
+  background: var(--blue-lt);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: .9rem;
+  line-height: 1.5;
+}
+.notice-icon { flex-shrink: 0; font-size: 1.1rem; line-height: 1.4; }
+.notice strong { color: var(--blue-dk); }
 .loading {
   display: flex;
   align-items: center;
