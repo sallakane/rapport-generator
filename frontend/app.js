@@ -55,6 +55,7 @@ $('form-login').addEventListener('submit', async e => {
     const res = await api('POST', '/api/login', { username, password });
     const data = await res.json();
     applyRole(data.role);
+    setUser(username);
     enterApp();
   } catch (err) {
     showError('login-error', err.message);
@@ -64,6 +65,7 @@ $('form-login').addEventListener('submit', async e => {
 async function logout() {
   await api('POST', '/api/logout').catch(() => {});
   applyRole(null);
+  setUser(null);
   showView('login');
   $('username').value = '';
   $('password').value = '';
@@ -77,6 +79,7 @@ $('btn-logout').addEventListener('click', logout);
     const res = await api('GET', '/api/me');
     const me = await res.json();
     applyRole(me.role);
+    setUser(me.user);
     enterApp();
   } catch {
     showView('login');
@@ -86,6 +89,13 @@ $('btn-logout').addEventListener('click', logout);
 // Affiche le lien « Administration » uniquement pour l'admin.
 function applyRole(role) {
   $('link-admin').classList.toggle('hidden', role !== 'admin');
+}
+
+// Affiche le nom de l'utilisateur connecté à côté de « Déconnexion ».
+function setUser(name) {
+  const el = $('user-name');
+  el.textContent = name || '';
+  el.classList.toggle('hidden', !name);
 }
 
 async function enterApp() {

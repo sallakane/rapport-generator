@@ -50,6 +50,8 @@ body {
 }
 
 .topbar-actions { display: flex; align-items: center; gap: .6rem; }
+.user-name { font-size: .88rem; font-weight: 600; color: var(--blue-dk); padding: 0 .2rem; }
+.user-name::before { content: '👤 '; font-weight: 400; }
 .topbar-actions a.btn-ghost { text-decoration: none; display: inline-flex; align-items: center; }
 
 /* ── Container ────────────────────────────────────────────────────── */
