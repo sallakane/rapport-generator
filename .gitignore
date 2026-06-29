@@ -1,4 +1,7 @@
 backend/tmp/
+backend/app.db
+backend/app.db-wal
+backend/app.db-shm
 unpacked_atlantis/
 skills/
 __pycache__/

@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Administration — ATLANTIS</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+  <header class="topbar">
+    <div class="logo">ATLANTIS<span>GEO</span></div>
+    <div class="topbar-actions">
+      <a href="index.html" class="btn-ghost">← Retour au générateur</a>
+      <button id="btn-logout" class="btn-ghost">Déconnexion</button>
+    </div>
+  </header>
+
+  <main class="admin-container">
+    <h1>Administration</h1>
+    <p class="subtitle">Statistiques d'utilisation et gestion des comptes générateurs.</p>
+
+    <div id="access-error" class="error hidden"></div>
+
+    <div id="admin-content" class="hidden">
+      <div class="admin-tabs">
+        <button class="admin-tab active" data-tab="stats">Statistiques</button>
+        <button class="admin-tab" data-tab="users">Utilisateurs</button>
+      </div>
+
+      <!-- ── Onglet Statistiques ─────────────────────────────────── -->
+      <section id="tab-stats">
+        <div class="kpi-row">
+          <div class="kpi">
+            <div id="kpi-total" class="kpi-value">—</div>
+            <div class="kpi-label">Rapports générés</div>
+          </div>
+          <div class="kpi">
+            <div id="kpi-users" class="kpi-value">—</div>
+            <div class="kpi-label">Générateurs actifs</div>
+          </div>
+          <div class="kpi">
+            <div id="kpi-types" class="kpi-value">—</div>
+            <div class="kpi-label">Types de projet</div>
+          </div>
+        </div>
+
+        <div class="card-grid">
+          <div class="chart-card">
+            <h3>Rapports par utilisateur</h3>
+            <div class="chart-wrap"><canvas id="chart-user"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <h3>Rapports par type de projet</h3>
+            <div class="chart-wrap"><canvas id="chart-type"></canvas></div>
+          </div>
+          <div class="chart-card full">
+            <h3>Activité dans le temps</h3>
+            <div class="chart-wrap"><canvas id="chart-day"></canvas></div>
+          </div>
+        </div>
+
+        <div class="table-card">
+          <h3 style="margin-bottom:.9rem;color:var(--blue-dk);font-size:.95rem;">Détail des téléchargements</h3>
+          <table class="data">
+            <thead>
+              <tr><th>Date</th><th>Heure</th><th>Utilisateur</th><th>Type de projet</th><th>Chap.</th><th>Annexes</th></tr>
+            </thead>
+            <tbody id="events-body"></tbody>
+          </table>
+          <div id="events-empty" class="empty-msg hidden">Aucun téléchargement enregistré pour le moment.</div>
+        </div>
+      </section>
+
+      <!-- ── Onglet Utilisateurs ─────────────────────────────────── -->
+      <section id="tab-users" class="hidden">
+        <form id="form-create" class="user-create">
+          <div class="field" style="flex:1;min-width:11rem;">
+            <label for="new-username">Nouvel identifiant</label>
+            <input id="new-username" type="text" autocomplete="off" placeholder="generateur-2" required />
+          </div>
+          <div class="field" style="flex:1;min-width:11rem;">
+            <label for="new-password">Mot de passe</label>
+            <input id="new-password" type="text" autocomplete="off" placeholder="mot de passe" required />
+          </div>
+          <button type="submit" class="btn-primary">Créer le générateur</button>
+        </form>
+        <div id="users-error" class="error hidden"></div>
+
+        <div class="table-card">
+          <table class="data">
+            <thead>
+              <tr><th>Identifiant</th><th>Rôle</th><th>Créé le</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="users-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script src="admin.js"></script>
+</body>
+</html>

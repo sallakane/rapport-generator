@@ -52,7 +52,9 @@ $('form-login').addEventListener('submit', async e => {
   const username = $('username').value.trim();
   const password = $('password').value;
   try {
-    await api('POST', '/api/login', { username, password });
+    const res = await api('POST', '/api/login', { username, password });
+    const data = await res.json();
+    applyRole(data.role);
     enterApp();
   } catch (err) {
     showError('login-error', err.message);
@@ -61,6 +63,7 @@ $('form-login').addEventListener('submit', async e => {
 
 async function logout() {
   await api('POST', '/api/logout').catch(() => {});
+  applyRole(null);
   showView('login');
   $('username').value = '';
   $('password').value = '';
@@ -71,12 +74,19 @@ $('btn-logout').addEventListener('click', logout);
 /* ── Bootstrap ──────────────────────────────────────────────────────── */
 (async () => {
   try {
-    await api('GET', '/api/me');
+    const res = await api('GET', '/api/me');
+    const me = await res.json();
+    applyRole(me.role);
     enterApp();
   } catch {
     showView('login');
   }
 })();
+
+// Affiche le lien « Administration » uniquement pour l'admin.
+function applyRole(role) {
+  $('link-admin').classList.toggle('hidden', role !== 'admin');
+}
 
 async function enterApp() {
   showView('select');
@@ -168,6 +178,17 @@ function resetPresetSelector() {
 }
 
 $('preset-select').addEventListener('change', e => applyPreset(e.target.value));
+
+// Type de projet à journaliser : le label du preset si une option est choisie,
+// sinon « Personnalisé » (sélection libre, ou preset modifié manuellement).
+function currentProjectType() {
+  const sel = $('preset-select');
+  if (sel && sel.value) {
+    const opt = sel.options[sel.selectedIndex];
+    if (opt && opt.textContent) return opt.textContent.trim();
+  }
+  return 'Personnalisé';
+}
 
 /* ── Rendu de l'arbre ───────────────────────────────────────────────── */
 function renderTree() {
@@ -391,6 +412,7 @@ $('btn-generate').addEventListener('click', async () => {
     const res = await api('POST', '/api/generate', {
       chapters: [...state.chapters],
       annexes: [...state.annexes],
+      project_type: currentProjectType(),
     });
     const blob = await res.blob();
     stopProgress(true);

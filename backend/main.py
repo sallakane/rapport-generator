@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from pydantic import BaseModel
 
+import db
 from extractor import parse, to_api_structure
 from filter import filter_document
 
@@ -65,6 +66,16 @@ def require_auth(request: Request) -> str:
     user = _get_user(request)
     if not user:
         raise HTTPException(status_code=401, detail='Non autorisé')
+    # On vérifie que le compte existe toujours (révocation possible côté admin).
+    if db.get_role(user) is None:
+        raise HTTPException(status_code=401, detail='Compte introuvable')
+    return user
+
+
+def require_admin(request: Request) -> str:
+    user = require_auth(request)
+    if db.get_role(user) != 'admin':
+        raise HTTPException(status_code=403, detail='Accès réservé à l\'administrateur')
     return user
 
 
@@ -86,6 +97,7 @@ async def startup():
     global _MODEL_STRUCTURE, _PRESETS
     if not MODEL_PATH.exists():
         raise RuntimeError(f'Modèle introuvable : {MODEL_PATH}')
+    db.init_db(APP_USER, APP_PASSWORD)
     parsed = parse(str(MODEL_PATH))
     _MODEL_STRUCTURE = to_api_structure(parsed)
     if PRESETS_PATH.exists():
@@ -102,10 +114,11 @@ class LoginBody(BaseModel):
 
 @app.post('/api/login')
 def login(body: LoginBody, response: Response):
-    if body.username != APP_USER or body.password != APP_PASSWORD:
+    role = db.authenticate(body.username, body.password)
+    if role is None:
         raise HTTPException(status_code=401, detail='Identifiants incorrects')
     _set_cookie(response, body.username)
-    return {'ok': True}
+    return {'ok': True, 'role': role}
 
 
 @app.post('/api/logout')
@@ -116,7 +129,7 @@ def logout(response: Response):
 
 @app.get('/api/me')
 def me(user: str = Depends(require_auth)):
-    return {'user': user}
+    return {'user': user, 'role': db.get_role(user)}
 
 
 # ── Routes document ──────────────────────────────────────────────────────────
@@ -135,6 +148,7 @@ def presets(user: str = Depends(require_auth)):
 class GenerateBody(BaseModel):
     chapters: list[str]   # ids cochés (h1_*, h2_*, h3_*) — cohérence garantie par le frontend
     annexes: list[int]    # numéros originaux d'annexes
+    project_type: str | None = None  # label du preset choisi, sinon « Personnalisé »
 
 
 @app.post('/api/generate')
@@ -165,11 +179,93 @@ def generate(body: GenerateBody, user: str = Depends(require_auth)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Erreur inattendue : {e}')
 
+    # Traçage : on n'enregistre que les générations réussies.
+    project_type = (body.project_type or '').strip() or 'Personnalisé'
+    try:
+        db.log_event(user, project_type, len(selected_chapters), len(selected_annexes))
+    except Exception:
+        pass  # le téléchargement ne doit jamais échouer à cause du journal
+
     return FileResponse(
         output_path,
         media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         filename='Rapport ATLANTIS R-26XXXXXX P1 V1 Mission GX-XXX VILLE (DP).docx',
     )
+
+
+# ── Routes admin (réservées au rôle admin) ───────────────────────────────────
+
+class CreateUserBody(BaseModel):
+    username: str
+    password: str
+
+
+class RenameUserBody(BaseModel):
+    username: str
+
+
+class PasswordBody(BaseModel):
+    password: str
+
+
+@app.get('/api/users')
+def users_list(admin: str = Depends(require_admin)):
+    return {'users': db.list_users()}
+
+
+@app.post('/api/users')
+def users_create(body: CreateUserBody, admin: str = Depends(require_admin)):
+    try:
+        # Les comptes créés via l'UI sont toujours des « générateurs ».
+        user = db.create_user(body.username, body.password, role='generateur')
+    except db.UserError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {'ok': True, 'user': user}
+
+
+@app.patch('/api/users/{user_id}/username')
+def users_rename(user_id: int, body: RenameUserBody, admin: str = Depends(require_admin)):
+    target = db.get_user(user_id)
+    if target and target['username'] == admin:
+        raise HTTPException(status_code=400, detail='Vous ne pouvez pas renommer votre propre compte.')
+    try:
+        db.rename_user(user_id, body.username)
+    except db.UserError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {'ok': True}
+
+
+@app.patch('/api/users/{user_id}/password')
+def users_password(user_id: int, body: PasswordBody, admin: str = Depends(require_admin)):
+    try:
+        db.set_password(user_id, body.password)
+    except db.UserError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {'ok': True}
+
+
+@app.delete('/api/users/{user_id}')
+def users_delete(user_id: int, admin: str = Depends(require_admin)):
+    target = db.get_user(user_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail='Utilisateur introuvable.')
+    # Garde-fous : pas d'auto-suppression, pas de suppression d'un admin.
+    if target['username'] == admin:
+        raise HTTPException(status_code=400, detail='Vous ne pouvez pas supprimer votre propre compte.')
+    if target['role'] == 'admin':
+        raise HTTPException(status_code=400, detail='Impossible de supprimer un compte administrateur.')
+    db.delete_user(user_id)
+    return {'ok': True}
+
+
+@app.get('/api/stats')
+def stats(admin: str = Depends(require_admin)):
+    return db.stats()
+
+
+@app.get('/api/events')
+def events(admin: str = Depends(require_admin)):
+    return {'events': db.fetch_events()}
 
 
 @app.get('/api/health')

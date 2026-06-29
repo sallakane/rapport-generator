@@ -24,14 +24,18 @@ rapport-generator/
 ├── modele_word_atlantis.docx       ← MODÈLE FIGÉ — base de tous les traitements
 ├── backend/
 │   ├── main.py                     ← FastAPI (cache du modèle au startup)
+│   ├── db.py                       ← SQLite : comptes utilisateurs + journal des téléchargements
+│   ├── app.db                      ← base SQLite (gitignored, créée au 1er démarrage)
 │   ├── extractor.py                ← parse(docx_path) + analyze(body) — hiérarchie + annexes
 │   ├── filter.py                   ← filtrage XML + sectPr + renum annexes + repack
 │   ├── docx_scripts/office/        ← scripts unpack.py / pack.py
 │   ├── requirements.txt
-│   ├── .env                        ← identifiants (gitignored)
+│   ├── .env                        ← identifiants admin (gitignored)
 │   └── tmp/                        ← jobs de génération (gitignored, cleanup auto)
 ├── frontend/
-│   ├── index.html                  ← login + vue sélection (plus de vue upload)
+│   ├── index.html                  ← login + vue sélection (lien Admin si rôle admin)
+│   ├── admin.html                  ← page admin : stats (Chart.js CDN) + gestion utilisateurs
+│   ├── admin.js                    ← logique page admin (réservée au rôle admin)
 │   ├── style.css
 │   └── app.js
 ├── infra/
@@ -95,9 +99,19 @@ Renvoie l'arbre du modèle (mis en cache au startup) :
 
 Les sections sans `chapters` (TOC type SOMMAIRE / table des annexes en début de doc) sont incluses dans la réponse mais filtrées côté frontend ; elles sont **toujours conservées** dans le doc généré (Q1 = (a) : on garde le sommaire figé, Word le rafraîchira à l'ouverture si besoin).
 
-### POST /api/generate — `{ chapters: ["h1_1","h2_3",...], annexes: [1, 5, 7] }`
+### POST /api/generate — `{ chapters: ["h1_1","h2_3",...], annexes: [1, 5, 7], project_type: "Maison sans sous-sol" }`
 Renvoie le `.docx` filtré en téléchargement direct.
 La cohérence parent/enfant (cascade) est garantie côté frontend ; le backend reçoit déjà une liste cohérente.
+`project_type` = label du preset choisi, ou `"Personnalisé"` si sélection libre (ou preset modifié à la main). Une génération **réussie** est journalisée dans `events` (qui / quand / type de projet).
+
+### Routes admin (rôle `admin` uniquement — dépendance `require_admin`)
+- `GET /api/users` → liste des comptes
+- `POST /api/users` — `{ username, password }` → crée un générateur
+- `PATCH /api/users/{id}/username` — `{ username }` → renomme
+- `PATCH /api/users/{id}/password` — `{ password }` → change le mot de passe
+- `DELETE /api/users/{id}` → supprime (refus si admin ou auto-suppression)
+- `GET /api/stats` → agrégats `{ total, by_user, by_type, by_day }` (heure de Paris)
+- `GET /api/events` → lignes détaillées du journal (date, heure, user, type, nb chap./annexes)
 
 ### GET /api/health → `{ status: "ok" }`
 
@@ -144,12 +158,21 @@ Le modèle est parsé **une seule fois** au startup (`@app.on_event('startup')`)
 
 L'application est un intranet privé — pas de référencement Google, accès restreint.
 
-### Stratégie retenue : session token simple
+### Stratégie retenue : multi-comptes en base SQLite + session token
 - Page de login (vanilla JS) avec formulaire user/password
-- Identifiants stockés dans `backend/.env` (`APP_USER`, `APP_PASSWORD`) — jamais dans le code
-- À la connexion réussie : cookie `session` signé via `itsdangerous` (`URLSafeTimedSerializer`), httpOnly, samesite=lax, max-age 8 h
-- Toutes les routes API vérifient le cookie via la dépendance `require_auth`, retournent 401 sinon
-- Le frontend redirige vers la vue login si 401 sur `/api/me`
+- **Comptes en base** (`backend/app.db`, table `users`) : un compte `admin` + des « générateurs ». Mots de passe hashés via `pbkdf2_hmac` (stdlib, pas de dépendance). Voir `backend/db.py`.
+- **Seed au 1er démarrage** : si la table `users` est vide, l'admin est créé à partir de `APP_USER`/`APP_PASSWORD` du `.env`. Si l'admin existe déjà, son mot de passe est resynchronisé depuis le `.env` à chaque démarrage (le `.env` reste la source de vérité pour l'admin → impossible de se verrouiller dehors).
+- **Rôles** : `admin` | `generateur`. Le rôle est **relu en base à chaque requête** (jamais figé dans le cookie) → révocation immédiate possible.
+- À la connexion réussie : cookie `session` signé via `itsdangerous` (`URLSafeTimedSerializer`), httpOnly, samesite=lax, max-age 8 h. Le cookie ne contient que le `username`.
+- `require_auth` (toute route privée) vérifie le cookie ET l'existence du compte. `require_admin` exige en plus `role == 'admin'` (sinon 403).
+- Le frontend redirige vers la vue login si 401 sur `/api/me`. Le lien « Administration » n'apparaît que si `role == 'admin'`.
+- **Gestion des comptes** : faite par l'admin depuis `admin.html` (créer / renommer / changer mot de passe / supprimer). Les comptes créés via l'UI sont toujours des `generateur`. Garde-fous : pas d'auto-suppression, pas de suppression/rename d'un admin via l'API.
+- `backend/db.py` : `DB_PATH` surchargeable via la variable d'env `APP_DB_PATH` (utile pour les tests, évite de toucher la base de prod).
+
+### Statistiques (admin)
+- Chaque génération réussie écrit une ligne dans `events`. La page `admin.html` affiche, via **Chart.js (CDN)** : rapports par utilisateur (barres), par type de projet (camembert), activité dans le temps (courbe par jour), plus un tableau détaillé (date, heure, user, type, nb chap./annexes).
+- Timestamps stockés en **UTC**, convertis en **Europe/Paris** pour l'affichage (le VPS tourne en UTC).
+- SQLite en mode **WAL** (compatible avec les 2 workers uvicorn ; volume d'écriture trivial).
 
 ### No-index (ne pas apparaître sur Google)
 Header HTTP dans Caddy :
