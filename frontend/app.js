@@ -151,6 +151,11 @@ function applyPreset(id) {
       state.chapters.add(p);
     }
   }
+  // Annexes pré-cochées du preset (n'ajoute que celles présentes dans le modèle)
+  const annexNums = new Set(state.structure.annexes.map(a => a.num));
+  for (const num of preset.annexes || []) {
+    if (annexNums.has(num)) state.annexes.add(num);
+  }
   syncChaptersToDOM();
   syncAnnexesToDOM();
   updateCount();

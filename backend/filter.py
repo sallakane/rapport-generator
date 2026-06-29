@@ -76,6 +76,40 @@ def _fix_rels(unpack_dir: str):
             f.write(fixed)
 
 
+def _force_update_fields(unpack_dir: str):
+    """Force Word à recalculer tous les champs à l'ouverture (<w:updateFields val=true>).
+    Indispensable car les deux sommaires (chapitres + table des annexes) sont des
+    champs TOC : sans rafraîchissement, Word afficherait le cache du modèle (tous
+    les chapitres / 24 annexes) au lieu de la sélection réellement conservée.
+    """
+    settings_path = os.path.join(unpack_dir, 'word', 'settings.xml')
+    if not os.path.exists(settings_path):
+        return
+    parser = etree.XMLParser(remove_blank_text=False)
+    tree = etree.parse(settings_path, parser)
+    root = tree.getroot()
+    if root.find(f'{WNS}updateFields') is not None:
+        return
+    el = etree.Element(f'{WNS}updateFields')
+    el.set(f'{WNS}val', 'true')
+    # CT_Settings impose un ordre : updateFields se place juste avant ces éléments
+    # « tardifs ». On l'insère devant le premier présent, sinon en fin.
+    after = {'hdrShapeDefaults', 'footnotePr', 'endnotePr', 'compat', 'rsids',
+             'mathPr', 'uiCompat97To2003', 'attachedSchema', 'themeFontLang',
+             'clrSchemeMapping', 'doNotIncludeSubdocsInStats',
+             'doNotAutoCompressPictures', 'forceUpgrade', 'captions',
+             'readModeInkLockDown', 'smartTagType', 'schemaLibrary',
+             'shapeDefaults', 'doNotEmbedSmartTags', 'decimalSymbol',
+             'listSeparator'}
+    pos = len(root)
+    for i, child in enumerate(root):
+        if etree.QName(child.tag).localname in after:
+            pos = i
+            break
+    root.insert(pos, el)
+    tree.write(settings_path, xml_declaration=True, encoding='UTF-8', standalone=True)
+
+
 def _decide_keep(
     owner: tuple,
     selected_chapters: set[str],
@@ -217,5 +251,6 @@ def filter_document(
             body.remove(children[i])
 
     _fix_rels(unpack_dir)
+    _force_update_fields(unpack_dir)
     tree.write(doc_path, xml_declaration=True, encoding='UTF-8', pretty_print=True)
     _pack(unpack_dir, output_path, docx_path)

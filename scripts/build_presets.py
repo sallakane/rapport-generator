@@ -38,6 +38,9 @@ MODEL_PATH = ROOT / 'modele_word_atlantis.docx'
 EXAMPLE_PATH = ROOT / 'exemple-sommaire.docx'
 OUTPUT_PATH = ROOT / 'backend' / 'project_presets.json'
 
+# Annexes pré-cochées pour TOUT type de projet sélectionné (numéros originaux).
+DEFAULT_ANNEXES = [1, 2, 3]
+
 # ── Décisions de correspondance (clés = libellé brut du sommaire) ──────────────
 # [] = entrée ignorée (pas d'équivalent fiable dans le modèle).
 # Les lignes « PENDING » attendent la validation du propriétaire — voir
@@ -198,7 +201,8 @@ def main():
             if idd not in full:
                 full.append(idd)
 
-        presets.append({'id': slug(pr['title']), 'label': pr['title'], 'chapters': full})
+        presets.append({'id': slug(pr['title']), 'label': pr['title'],
+                        'chapters': full, 'annexes': list(DEFAULT_ANNEXES)})
         print(f'  {pr["title"]}: {len(full)} chapitres')
 
     OUTPUT_PATH.write_text(
