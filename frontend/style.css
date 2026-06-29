@@ -182,16 +182,16 @@ h1 { font-size: 1.5rem; font-weight: 700; color: var(--blue-dk); margin-bottom: 
   gap: .7rem;
   margin-bottom: 1.5rem;
   padding: .85rem 1.1rem;
-  background: var(--blue-lt);
-  border: 1px solid var(--border);
-  border-left: 4px solid var(--accent);
+  background: #e8f6ee;
+  border: 1px solid #b8e0c8;
+  border-left: 4px solid var(--green);
   border-radius: 8px;
   color: var(--text);
   font-size: .9rem;
   line-height: 1.5;
 }
 .notice-icon { flex-shrink: 0; font-size: 1.1rem; line-height: 1.4; }
-.notice strong { color: var(--blue-dk); }
+.notice strong { color: var(--green); }
 .loading {
   display: flex;
   align-items: center;
