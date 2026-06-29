@@ -140,6 +140,82 @@ def _clear_runs_keep_pPr(p):
             p.remove(child)
 
 
+XML_SPACE = '{http://www.w3.org/XML/1998/namespace}space'
+
+
+def _make_toc1_entry(text: str):
+    """Construit un paragraphe statique style TOC1 contenant `text` (pas de champ)."""
+    p = etree.Element(f'{WNS}p')
+    pPr = etree.SubElement(p, f'{WNS}pPr')
+    pStyle = etree.SubElement(pPr, f'{WNS}pStyle')
+    pStyle.set(f'{WNS}val', 'TOC1')
+    r = etree.SubElement(p, f'{WNS}r')
+    t = etree.SubElement(r, f'{WNS}t')
+    t.set(XML_SPACE, 'preserve')
+    t.text = text
+    return p
+
+
+def _rebuild_annex_toc(body, kept_annex_nums: list[int], annex_remap: dict[int, int],
+                       label_by_num: dict[int, str]):
+    """Remplace le champ TOC des annexes par une liste statique des annexes conservées.
+
+    Le sommaire des annexes du modèle est un champ `TOC \\n \\h \\z \\t "Titre annexes;1"`
+    SANS numéro de page (\\n) : c'est donc une simple liste de titres. Plutôt que de
+    laisser Word le rafraîchir (comportement bancal sur ce modèle : il reprend le
+    sommaire général), on le remplace par des paragraphes figés générés à partir des
+    annexes réellement cochées et renumérotées. Aucune perte (pas de pagination à
+    recalculer) et plus rien à actualiser côté utilisateur.
+    """
+    kids = list(body)
+
+    # 1. Localiser le paragraphe qui ouvre le champ TOC des annexes (instrText \t "Titre annexes…")
+    start = None
+    for idx, el in enumerate(kids):
+        if not _is_p(el):
+            continue
+        instr = ''.join(t.text or '' for t in el.findall(f'.//{WNS}instrText'))
+        if 'TOC' in instr and 'Titre annexes' in instr:
+            start = idx
+            break
+    if start is None:
+        return  # pas de champ TOC annexes (modèle différent) : rien à faire
+
+    # 2. Trouver la fin du champ via le compteur de fldChar begin/end
+    depth = 0
+    seen_begin = False
+    end = start
+    for idx in range(start, len(kids)):
+        el = kids[idx]
+        if not _is_p(el):
+            continue
+        for fc in el.findall(f'.//{WNS}fldChar'):
+            kind = fc.get(f'{WNS}fldCharType')
+            if kind == 'begin':
+                depth += 1
+                seen_begin = True
+            elif kind == 'end':
+                depth -= 1
+        if seen_begin and depth == 0:
+            end = idx
+            break
+
+    # 3. Construire les entrées statiques (ordre des nouveaux numéros 1, 2, 3…)
+    new_paras = []
+    for old in kept_annex_nums:
+        new_num = annex_remap.get(old, old)
+        label = label_by_num.get(old, '').strip()
+        text = f'Annexe n°{new_num} {label}'.rstrip()
+        new_paras.append(_make_toc1_entry(text))
+
+    # 4. Remplacer le bloc [start..end] par les entrées statiques
+    insert_pos = list(body).index(kids[start])
+    for el in kids[start:end + 1]:
+        body.remove(el)
+    for offset, p in enumerate(new_paras):
+        body.insert(insert_pos + offset, p)
+
+
 def _renumber_annex_paragraph(p, old_num: int, new_num: int):
     """Réécrit « Annexe n°<old_num> » en « Annexe n°<new_num> » dans le paragraphe.
     Cherche d'abord un <w:t> unique contenant le pattern complet, fallback cross-run."""
@@ -249,6 +325,11 @@ def filter_document(
     for i in range(len(children) - 1, -1, -1):
         if not keep[i]:
             body.remove(children[i])
+
+    # Remplace le champ TOC des annexes par une liste statique (re-scan du body
+    # car les indices `children` ci-dessus ne sont plus valides après suppression).
+    label_by_num = {a['num']: a['label'] for a in parsed.annexes}
+    _rebuild_annex_toc(body, kept_annex_nums, annex_remap, label_by_num)
 
     _fix_rels(unpack_dir)
     _force_update_fields(unpack_dir)
