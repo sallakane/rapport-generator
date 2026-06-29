@@ -221,6 +221,7 @@ sudo systemctl reload caddy
 - Le skill `pack.py` valide les rels et rejette `file:///` et `about:blank` — `_fix_rels` les neutralise systématiquement.
 - La détection des styles est calée sur `Title`/`Heading1`/`Heading2`/`Heading3`. Si on remplace le modèle par un doc utilisant `Titre`/`Titre1`, il faudra ré-étendre `extractor.py`.
 - Une seule zone paysage dans le modèle actuel (mini-section "Légende EM…" dans Synthèse pressiométrique). Le mécanisme d'override sectPr est prêt si d'autres apparaissent.
+- **Sommaire / table des annexes générée par Word** : le modèle peut contenir en tête un sommaire avec styles `TOC1`/`TOC2`/`TOC3`, qui cite « Annexe n°X ». Ces paragraphes sont **ignorés** par la détection d'annexes (`extractor.py`) et par la renumérotation (`filter.py`) — sinon ils basculeraient `in_annex_zone` trop tôt et seraient renumérotés à tort. Le sommaire reste figé dans le doc généré (Word le rafraîchit à l'ouverture).
 - Ne jamais committer les fichiers dans `backend/tmp/`.
 
 ## Ordre de développement

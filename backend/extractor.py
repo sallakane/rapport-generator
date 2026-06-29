@@ -105,8 +105,14 @@ def analyze(body) -> ParsedDoc:
         text = _get_text(child)
         style = _get_style(child)
 
+        # Entrées de table des matières (SOMMAIRE / table des annexes générée par Word,
+        # styles TOC1/TOC2/TOC3…) : ce ne sont jamais des titres ni des annexes réelles.
+        # Elles citent « Annexe n°X » et casseraient sinon la détection (bascule prématurée
+        # de in_annex_zone). On les rattache au regroupement courant comme du contenu.
+        is_toc = style.startswith('TOC')
+
         # Détection annexe par regex sur le texte (les annexes n'ont pas de style dédié)
-        m = ANNEX_RE.match(text) if text else None
+        m = ANNEX_RE.match(text) if (text and not is_toc) else None
         if m:
             if first_annex_idx is None:
                 first_annex_idx = i
@@ -125,6 +131,11 @@ def analyze(body) -> ParsedDoc:
         if in_annex_zone:
             # Contenu suivant le titre d'annexe (corps de l'annexe)
             owners[i] = ('annex', current_annex_num) if current_annex_num is not None else ('annex_orphan',)
+            continue
+
+        if is_toc:
+            # Ligne de sommaire (avant les vraies annexes) : contenu ordinaire.
+            owners[i] = ('section', section_idx) if current_section is not None else ('cover',)
             continue
 
         if style == 'Title':

@@ -22,7 +22,7 @@ from pathlib import Path
 
 from lxml import etree
 
-from extractor import ANNEX_RE, analyze
+from extractor import ANNEX_RE, analyze, _get_style
 
 W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 WNS = f'{{{W}}}'
@@ -199,6 +199,10 @@ def filter_document(
     if annex_remap:
         for i, child in enumerate(children):
             if not keep[i] or not _is_p(child):
+                continue
+            # Ne pas renuméroter les lignes de sommaire (table des annexes générée
+            # par Word, styles TOC*) : seules les vraies annexes du corps sont remappées.
+            if _get_style(child).startswith('TOC'):
                 continue
             text = _get_text(child)
             m = ANNEX_RE.match(text) if text else None
