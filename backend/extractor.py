@@ -26,6 +26,22 @@ WNS = f'{{{W}}}'
 
 ANNEX_RE = re.compile(r'^\s*Annexe\s*n[°º]\s*(\d+)', re.IGNORECASE)
 
+# Le modèle peut utiliser les styles anglais (Title/Heading*) ou français
+# (Titre/Titre1…), selon la version de Word qui l'a enregistré. On accepte les deux.
+TITLE_STYLES = {'Title', 'Titre'}
+H1_STYLES = {'Heading1', 'Titre1'}
+H2_STYLES = {'Heading2', 'Titre2'}
+H3_STYLES = {'Heading3', 'Titre3'}
+
+# Styles des lignes de sommaire (table des matières générée par Word) : TOC1/2/3
+# (anglais) ou TM1/2/3 (français, « Table des Matières »). À ignorer pour la
+# détection des titres et des annexes.
+TOC_STYLE_PREFIXES = ('TOC', 'TM')
+
+
+def _is_toc_style(style: str) -> bool:
+    return style.startswith(TOC_STYLE_PREFIXES)
+
 
 def _get_style(p) -> str:
     pPr = p.find(f'{WNS}pPr')
@@ -106,10 +122,11 @@ def analyze(body) -> ParsedDoc:
         style = _get_style(child)
 
         # Entrées de table des matières (SOMMAIRE / table des annexes générée par Word,
-        # styles TOC1/TOC2/TOC3…) : ce ne sont jamais des titres ni des annexes réelles.
-        # Elles citent « Annexe n°X » et casseraient sinon la détection (bascule prématurée
-        # de in_annex_zone). On les rattache au regroupement courant comme du contenu.
-        is_toc = style.startswith('TOC')
+        # styles TOC1/TOC2/TOC3 en anglais, TM1/TM2/TM3 en français) : ce ne sont jamais
+        # des titres ni des annexes réelles. Elles citent « Annexe n°X » et casseraient
+        # sinon la détection (bascule prématurée de in_annex_zone). On les rattache au
+        # regroupement courant comme du contenu.
+        is_toc = _is_toc_style(style)
 
         # Détection annexe par regex sur le texte (les annexes n'ont pas de style dédié)
         m = ANNEX_RE.match(text) if (text and not is_toc) else None
@@ -138,7 +155,7 @@ def analyze(body) -> ParsedDoc:
             owners[i] = ('section', section_idx) if current_section is not None else ('cover',)
             continue
 
-        if style == 'Title':
+        if style in TITLE_STYLES:
             section_idx += 1
             current_section = {
                 'id': f'section_{section_idx}',
@@ -150,7 +167,7 @@ def analyze(body) -> ParsedDoc:
             owners[i] = ('section', section_idx)
             continue
 
-        if style == 'Heading1':
+        if style in H1_STYLES:
             h1_idx += 1
             current_h1 = {
                 'id': f'h1_{h1_idx}',
@@ -167,7 +184,7 @@ def analyze(body) -> ParsedDoc:
             owners[i] = ('h1', h1_idx)
             continue
 
-        if style == 'Heading2':
+        if style in H2_STYLES:
             h2_idx += 1
             current_h2 = {
                 'id': f'h2_{h2_idx}',
@@ -180,7 +197,7 @@ def analyze(body) -> ParsedDoc:
             owners[i] = ('h2', h2_idx)
             continue
 
-        if style == 'Heading3':
+        if style in H3_STYLES:
             h3_idx += 1
             current_h3 = {
                 'id': f'h3_{h3_idx}',

@@ -8,9 +8,11 @@ Algorithme :
   4. override sectPr : si un paragraphe portant un sectPr inline doit être
      supprimé alors que sa section termine au moins un paragraphe conservé,
      on le conserve (en vidant ses runs) pour préserver l'orientation
-  5. renumérotation des paragraphes « Annexe n°X » conservés (1, 2, 3…)
+  5. renumérotation des annexes conservées (1, 2, 3…) : le numéro, produit par un
+     champ PAGE dans le modèle, est figé en texte statique (saut de ligne préservé)
   6. suppression des enfants marqués
-  7. fix_rels + repack (skill office/pack.py)
+  7. fix_rels + updateFields (le sommaire des annexes reste un vrai champ TOC,
+     rafraîchi par Word à l'ouverture) + repack (skill office/pack.py)
 """
 
 import os
@@ -18,11 +20,12 @@ import re
 import shutil
 import subprocess
 import sys
+from copy import deepcopy
 from pathlib import Path
 
 from lxml import etree
 
-from extractor import ANNEX_RE, analyze, _get_style
+from extractor import ANNEX_RE, analyze, _get_style, _is_toc_style
 
 W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 WNS = f'{{{W}}}'
@@ -143,104 +146,91 @@ def _clear_runs_keep_pPr(p):
 XML_SPACE = '{http://www.w3.org/XML/1998/namespace}space'
 
 
-def _make_toc1_entry(text: str):
-    """Construit un paragraphe statique style TOC1 contenant `text` (pas de champ)."""
-    p = etree.Element(f'{WNS}p')
-    pPr = etree.SubElement(p, f'{WNS}pPr')
-    pStyle = etree.SubElement(pPr, f'{WNS}pStyle')
-    pStyle.set(f'{WNS}val', 'TOC1')
-    r = etree.SubElement(p, f'{WNS}r')
-    t = etree.SubElement(r, f'{WNS}t')
-    t.set(XML_SPACE, 'preserve')
-    t.text = text
-    return p
-
-
-def _rebuild_annex_toc(body, kept_annex_nums: list[int], annex_remap: dict[int, int],
-                       label_by_num: dict[int, str]):
-    """Remplace le champ TOC des annexes par une liste statique des annexes conservées.
-
-    Le sommaire des annexes du modèle est un champ `TOC \\n \\h \\z \\t "Titre annexes;1"`
-    SANS numéro de page (\\n) : c'est donc une simple liste de titres. Plutôt que de
-    laisser Word le rafraîchir (comportement bancal sur ce modèle : il reprend le
-    sommaire général), on le remplace par des paragraphes figés générés à partir des
-    annexes réellement cochées et renumérotées. Aucune perte (pas de pagination à
-    recalculer) et plus rien à actualiser côté utilisateur.
+def _neutralize_number_field(p, new_num: int) -> bool:
+    """Titre d'annexe ATLANTIS : le numéro est produit par un champ (PAGE), suivi d'un
+    <w:br/> puis du libellé. On remplace TOUT le champ (runs fldChar begin..end) par un
+    unique run statique contenant `new_num`, en conservant le formatage (rPr) du run
+    résultat. Le <w:br/> et le libellé restent intacts → numéro et titre sur deux lignes,
+    et le numéro devient du texte figé (immunisé contre le rafraîchissement des champs).
+    Retourne True si un champ a été neutralisé.
     """
-    kids = list(body)
-
-    # 1. Localiser le paragraphe qui ouvre le champ TOC des annexes (instrText \t "Titre annexes…")
-    start = None
-    for idx, el in enumerate(kids):
-        if not _is_p(el):
-            continue
-        instr = ''.join(t.text or '' for t in el.findall(f'.//{WNS}instrText'))
-        if 'TOC' in instr and 'Titre annexes' in instr:
-            start = idx
-            break
-    if start is None:
-        return  # pas de champ TOC annexes (modèle différent) : rien à faire
-
-    # 2. Trouver la fin du champ via le compteur de fldChar begin/end
-    depth = 0
-    seen_begin = False
-    end = start
-    for idx in range(start, len(kids)):
-        el = kids[idx]
-        if not _is_p(el):
-            continue
-        for fc in el.findall(f'.//{WNS}fldChar'):
+    runs = p.findall(f'{WNS}r')
+    begin_i = sep_i = end_i = None
+    for i, r in enumerate(runs):
+        for fc in r.findall(f'{WNS}fldChar'):
             kind = fc.get(f'{WNS}fldCharType')
-            if kind == 'begin':
-                depth += 1
-                seen_begin = True
+            # 'begin' et 'separate' peuvent partager un même run après normalisation
+            # par unpack.py (d'où le >= et non > dans les comparaisons d'indices).
+            if kind == 'begin' and begin_i is None:
+                begin_i = i
+            elif kind == 'separate':
+                sep_i = i
             elif kind == 'end':
-                depth -= 1
-        if seen_begin and depth == 0:
-            end = idx
+                end_i = i
+        if end_i is not None:
+            break
+    if begin_i is None or end_i is None or begin_i >= end_i:
+        return False
+
+    # Runs résultat = ceux entre 'separate' (ou 'begin' si pas de separate) et 'end',
+    # exclus. On y prend le rPr du 1er run avec texte pour préserver la mise en forme.
+    res_start = (sep_i if sep_i is not None else begin_i) + 1
+    result_rpr = None
+    for r in runs[res_start:end_i]:
+        if r.find(f'{WNS}t') is not None:
+            result_rpr = r.find(f'{WNS}rPr')
             break
 
-    # 3. Construire les entrées statiques (ordre des nouveaux numéros 1, 2, 3…)
-    new_paras = []
-    for old in kept_annex_nums:
-        new_num = annex_remap.get(old, old)
-        label = label_by_num.get(old, '').strip()
-        text = f'Annexe n°{new_num} {label}'.rstrip()
-        new_paras.append(_make_toc1_entry(text))
+    new_r = etree.Element(f'{WNS}r')
+    if result_rpr is not None:
+        new_r.append(deepcopy(result_rpr))
+    t = etree.SubElement(new_r, f'{WNS}t')
+    t.set(XML_SPACE, 'preserve')
+    t.text = str(new_num)
 
-    # 4. Remplacer le bloc [start..end] par les entrées statiques
-    insert_pos = list(body).index(kids[start])
-    for el in kids[start:end + 1]:
-        body.remove(el)
-    for offset, p in enumerate(new_paras):
-        body.insert(insert_pos + offset, p)
+    field_runs = runs[begin_i:end_i + 1]
+    field_runs[0].addprevious(new_r)
+    for r in field_runs:
+        p.remove(r)
+    return True
+
+
+def _renumber_annex_text(p, old_num: int, new_num: int) -> bool:
+    """Fallback : numéro en texte figé (pas de champ). Remplace « Annexe n°<old> » en
+    ne modifiant QUE les <w:t> chevauchant le motif — les runs suivants (dont le
+    <w:br/> et le libellé) restent en place."""
+    pattern = re.compile(r'Annexe\s*n[°º]\s*' + str(old_num) + r'(?!\d)', re.IGNORECASE)
+    replacement = f'Annexe n°{new_num}'
+    ts = p.findall(f'.//{WNS}t')
+    texts = [t.text or '' for t in ts]
+    m = pattern.search(''.join(texts))
+    if not m:
+        return False
+    s, e = m.span()
+    pos = 0
+    done = False
+    for t, txt in zip(ts, texts):
+        n_start, n_end = pos, pos + len(txt)
+        pos = n_end
+        if n_end <= s or n_start >= e:
+            continue  # run hors du motif : intact
+        pre = txt[:s - n_start] if n_start < s else ''
+        post = txt[e - n_start:] if n_end > e else ''
+        if not done:
+            t.text = pre + replacement + post
+            done = True
+        else:
+            t.text = pre + post
+    return True
 
 
 def _renumber_annex_paragraph(p, old_num: int, new_num: int):
-    """Réécrit « Annexe n°<old_num> » en « Annexe n°<new_num> » dans le paragraphe.
-    Cherche d'abord un <w:t> unique contenant le pattern complet, fallback cross-run."""
-    pattern = re.compile(
-        r'Annexe\s*n[°º]\s*' + str(old_num) + r'(?!\d)',
-        re.IGNORECASE,
-    )
-    replacement = f'Annexe n°{new_num}'
-
-    # Cas simple : pattern dans un seul <w:t>
-    for t in p.findall(f'.//{WNS}t'):
-        if t.text and pattern.search(t.text):
-            t.text = pattern.sub(replacement, t.text, count=1)
-            return
-
-    # Fallback : pattern réparti sur plusieurs runs
-    ts = p.findall(f'.//{WNS}t')
-    full = ''.join(t.text or '' for t in ts)
-    if not pattern.search(full):
-        return  # paragraphe annexe non standard, on laisse tel quel
-    new_full = pattern.sub(replacement, full, count=1)
-    if ts:
-        ts[0].text = new_full
-        for t in ts[1:]:
-            t.text = ''
+    """Fixe le numéro d'un titre d'annexe conservé à `new_num`, en préservant la mise
+    en page (saut de ligne numéro / libellé). Neutralise d'abord le champ PAGE ; à
+    défaut, remplace le texte figé."""
+    if _neutralize_number_field(p, new_num):
+        return
+    _renumber_annex_text(p, old_num, new_num)
 
 
 def filter_document(
@@ -255,6 +245,11 @@ def filter_document(
     selected_chapters : ids cochés (h1_*, h2_*, h3_*) — la cohérence parent/enfant
                         est garantie par le frontend (cascade)
     selected_annexes  : numéros d'annexes originaux à conserver
+
+    Le sommaire des annexes reste un vrai champ TOC Word (`\\t "Titre annexes;1"`,
+    entrées en style TM1) : il est rafraîchi à l'ouverture via updateFields, comme
+    le sommaire général. Le numéro de chaque annexe conservée est figé en texte
+    statique (voir _neutralize_number_field) pour ne pas être recalculé en n° de page.
     """
     _unpack(docx_path, unpack_dir)
 
@@ -311,25 +306,23 @@ def filter_document(
             if not keep[i] or not _is_p(child):
                 continue
             # Ne pas renuméroter les lignes de sommaire (table des annexes générée
-            # par Word, styles TOC*) : seules les vraies annexes du corps sont remappées.
-            if _get_style(child).startswith('TOC'):
+            # par Word, styles TOC* / TM*) : seules les vraies annexes du corps sont remappées.
+            if _is_toc_style(_get_style(child)):
                 continue
             text = _get_text(child)
             m = ANNEX_RE.match(text) if text else None
             if m:
                 old_num = int(m.group(1))
-                if old_num in annex_remap and annex_remap[old_num] != old_num:
+                # Toujours traiter les annexes conservées (même si le numéro ne change
+                # pas) : ça fige le champ PAGE du numéro pour qu'il ne soit pas recalculé
+                # en numéro de page au rafraîchissement des champs.
+                if old_num in annex_remap:
                     _renumber_annex_paragraph(child, old_num, annex_remap[old_num])
 
     # Suppression (en ordre décroissant pour ne pas perturber les indices)
     for i in range(len(children) - 1, -1, -1):
         if not keep[i]:
             body.remove(children[i])
-
-    # Remplace le champ TOC des annexes par une liste statique (re-scan du body
-    # car les indices `children` ci-dessus ne sont plus valides après suppression).
-    label_by_num = {a['num']: a['label'] for a in parsed.annexes}
-    _rebuild_annex_toc(body, kept_annex_nums, annex_remap, label_by_num)
 
     _fix_rels(unpack_dir)
     _force_update_fields(unpack_dir)

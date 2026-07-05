@@ -49,14 +49,14 @@ rapport-generator/
 
 ## Convention de styles (modèle ATLANTIS actuel)
 
-Le modèle utilise les **styles standards anglais** (et non `Titre`/`Titre1`/`Titreannexes` comme dans la version précédente) :
+Le modèle actuel (`modele_word_atlantis.docx`, enregistré par un Word **français**) utilise les styles FR ; `extractor.py` reconnaît **les deux jeux** (EN + FR) via les constantes `TITLE_STYLES`/`H1_STYLES`/`H2_STYLES`/`H3_STYLES` :
 
-- `Title`    → section principale (TITRE EN MAJUSCULES) — **non cochable**, regroupement visuel uniquement
-- `Heading1` → chapitre — cochable
-- `Heading2` → sous-chapitre — cochable
-- `Heading3` → sous-sous-chapitre — cochable (profondeur max ; pas de Heading4 dans le modèle)
+- `Title` / `Titre`     → section principale (TITRE EN MAJUSCULES) — **non cochable**, regroupement visuel uniquement
+- `Heading1` / `Titre1` → chapitre — cochable
+- `Heading2` / `Titre2` → sous-chapitre — cochable
+- `Heading3` / `Titre3` → sous-sous-chapitre — cochable (profondeur max ; pas de niveau 4 dans le modèle)
 
-**Annexes** : aucun style spécifique. Détectées par regex sur le texte du paragraphe :
+**Annexes** : style `Titreannexes` pour les vraies pages d'annexes, mais la détection reste faite par regex sur le texte du paragraphe (le style seul ne suffit pas à isoler numéro/label) :
 ```
 ^Annexe\s*n[°º]\s*(\d+)
 ```
@@ -140,10 +140,11 @@ Cette table d'owners est partagée avec `filter.py` pour décider quoi garder/su
    - Heading1/2/3 : conservé si son id est dans `selected_chapters`.
    - Annexe : conservée si son numéro est dans `selected_annexes`.
 5. **Override sectPr** : un paragraphe portant un `<w:sectPr>` inline qui devait être supprimé est forcé conservé si sa section englobe au moins un paragraphe conservé. Ses runs sont vidés (`_clear_runs_keep_pPr`) pour ne pas réintroduire de texte parasite. Préserve l'orientation paysage.
-6. **Renumérotation des annexes** : pour chaque paragraphe d'annexe conservé, on remappe `Annexe n°<old>` → `Annexe n°<new>` selon l'ordre des annexes conservées (1, 2, 3…). Tentative de remplacement dans un `<w:t>` unique d'abord, fallback cross-run (concatène, remplace, remet tout dans le 1er run).
+6. **Renumérotation des annexes** : chaque annexe conservée est remappée `Annexe n°<old>` → `Annexe n°<new>` selon l'ordre des annexes conservées (1, 2, 3…). Dans le modèle, le numéro est produit par un **champ PAGE** suivi d'un `<w:br/>` puis du libellé (numéro et titre sur deux lignes). `_neutralize_number_field` remplace tout le champ par un run **statique** = nouveau numéro (préserve le `rPr`, le `<w:br/>` et le libellé). Robuste aux deux structures XML : brute (fldChar begin/separate/end en runs séparés) et normalisée par `unpack.py` (begin+separate fusionnés). Fallback texte figé (`_renumber_annex_text`) qui ne touche que les `<w:t>` chevauchant le motif. Appliqué à **toutes** les annexes conservées (même numéro inchangé) pour figer systématiquement le champ.
 7. Suppression des enfants marqués (en ordre décroissant pour ne pas perturber les indices).
 8. `_fix_rels` neutralise les `Target="file:///..."` Windows et `Target="about:blank"` (rejetés par le validateur du skill `pack.py`).
-9. Réécrit `document.xml` et repack via `office/pack.py`.
+9. `_force_update_fields` pose `<w:updateFields val="true">` : le **sommaire des annexes reste un vrai champ TOC Word** (`\t "Titre annexes;1"`, entrées en style `TM1`) que Word rafraîchit à l'ouverture, comme le sommaire général. Plus de liste statique (ancien hack `_rebuild_annex_toc` supprimé — le nouveau modèle, avec entrées en `TM1` distinct du sommaire général, rafraîchit correctement).
+10. Réécrit `document.xml` et repack via `office/pack.py`.
 
 **Limitation v1 — assumée** : les références textuelles "voir annexe n°5" dans le corps du doc ne sont **pas** remappées (Q2 = (a)). Si l'annexe 5 devient l'annexe 2, le texte continuera de pointer vers "n°5". À éventuellement traiter en v2.
 
@@ -242,9 +243,9 @@ sudo systemctl reload caddy
 ## Points de vigilance
 - Le modèle pèse ~19 Mo (essentiellement des images). Le doc généré reste de cet ordre tant qu'on garde des chapitres avec images.
 - Le skill `pack.py` valide les rels et rejette `file:///` et `about:blank` — `_fix_rels` les neutralise systématiquement.
-- La détection des styles est calée sur `Title`/`Heading1`/`Heading2`/`Heading3`. Si on remplace le modèle par un doc utilisant `Titre`/`Titre1`, il faudra ré-étendre `extractor.py`.
+- La détection des styles reconnaît **les jeux EN et FR** (`Title`/`Titre`, `Heading1-3`/`Titre1-3`) via les constantes en tête d'`extractor.py`. Si un futur modèle introduit d'autres noms de styles, les ajouter à ces constantes.
 - Une seule zone paysage dans le modèle actuel (mini-section "Légende EM…" dans Synthèse pressiométrique). Le mécanisme d'override sectPr est prêt si d'autres apparaissent.
-- **Sommaire / table des annexes générée par Word** : le modèle peut contenir en tête un sommaire avec styles `TOC1`/`TOC2`/`TOC3`, qui cite « Annexe n°X ». Ces paragraphes sont **ignorés** par la détection d'annexes (`extractor.py`) et par la renumérotation (`filter.py`) — sinon ils basculeraient `in_annex_zone` trop tôt et seraient renumérotés à tort. Le sommaire reste figé dans le doc généré (Word le rafraîchit à l'ouverture).
+- **Sommaire / table des annexes générée par Word** : le modèle contient en tête des sommaires (styles `TOC1-3` en EN ou `TM1-3` en FR) qui citent « Annexe n°X ». `_is_toc_style()` (préfixes `TOC`/`TM`) les fait **ignorer** par la détection d'annexes (`extractor.py`) et la renumérotation (`filter.py`) — sinon ils basculeraient `in_annex_zone` trop tôt et seraient renumérotés à tort. Les sommaires (général ET annexes) restent de vrais champs TOC, rafraîchis par Word à l'ouverture (`updateFields`). Le sommaire des annexes fonctionne correctement car ses entrées sont en `TM1`, style distinct du sommaire général.
 - Ne jamais committer les fichiers dans `backend/tmp/`.
 
 ## Ordre de développement
